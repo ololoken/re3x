@@ -868,8 +868,13 @@ psSelectDevice()
 		}
 
 		if(bestFsMode < 0){
-			printf("WARNING: Cannot find desired video mode, selecting device cancelled\n");
-		//	return FALSE;
+			//printf("WARNING: Cannot find desired video mode, selecting device cancelled\n");
+			//return FALSE;
+			//todo: (ololoken) fixme
+			bestFsMode = 1;
+			bestWidth = 800;
+			bestHeight = 640;
+			bestDepth = 32;
 		}
 		GcurSelVM = bestFsMode;
 
@@ -2608,8 +2613,4 @@ int strncasecmp(const char *str1, const char *str2, size_t len)
 	return _strnicmp(str1, str2, len);
 }
 #endif
-#else
-#include "rwcore.h"
-RwUInt32 gGameState;
-int _dwMemAvailPhys = 1000000;
 #endif
