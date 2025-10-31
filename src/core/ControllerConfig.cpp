@@ -185,9 +185,9 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 	SetControllerKeyAssociatedWithAction    (VEHICLE_LOOKRIGHT,                   rsPADDOWN,  KEYBOARD);
 	SetControllerKeyAssociatedWithAction    (VEHICLE_LOOKRIGHT,                   'E',        OPTIONAL_EXTRA);
 																              
-	if ( _dwOperatingSystemVersion == OS_WIN98 )											              
+	if ( _dwOperatingSystemVersion == OS_WIN98 )
 		SetControllerKeyAssociatedWithAction(VEHICLE_HORN,                        rsSHIFT,    OPTIONAL_EXTRA); // BUG: must be KEYBOARD ?											              
-	else		
+	else
 	{
 		SetControllerKeyAssociatedWithAction(VEHICLE_HORN,                        rsLSHIFT,   OPTIONAL_EXTRA);
 		SetControllerKeyAssociatedWithAction(VEHICLE_HORN,                        rsRSHIFT,   KEYBOARD);
@@ -247,9 +247,9 @@ void CControllerConfigManager::InitDefaultControlConfiguration()
 
 	SetControllerKeyAssociatedWithAction    (PED_ANSWER_PHONE,                    rsTAB,      KEYBOARD);
 																              
-	if ( _dwOperatingSystemVersion == OS_WIN98 )											              
+	if ( _dwOperatingSystemVersion == OS_WIN98 )
 		SetControllerKeyAssociatedWithAction(PED_SPRINT,                          rsSHIFT,    OPTIONAL_EXTRA); // BUG: must be KEYBOARD ?											              
-	else		
+	else
 	{
 		SetControllerKeyAssociatedWithAction(PED_SPRINT,                          rsLSHIFT,   OPTIONAL_EXTRA);
 #ifndef FIX_BUGS

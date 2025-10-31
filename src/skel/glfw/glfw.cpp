@@ -557,11 +557,13 @@ psInitialize(void)
 	debug("Physical memory size %llu\n", _dwMemAvailPhys);
 #else
 #ifndef __APPLE__
+#ifndef __EMSCRIPTEN__
  	struct sysinfo systemInfo;
 	sysinfo(&systemInfo);
 	_dwMemAvailPhys = systemInfo.freeram;
 	debug("Physical memory size %u\n", systemInfo.totalram);
 	debug("Available physical memory %u\n", systemInfo.freeram);
+#endif
 #else
 	uint64_t size = 0;
 	uint64_t page_size = 0;
@@ -867,7 +869,7 @@ psSelectDevice()
 
 		if(bestFsMode < 0){
 			printf("WARNING: Cannot find desired video mode, selecting device cancelled\n");
-			return FALSE;
+		//	return FALSE;
 		}
 		GcurSelVM = bestFsMode;
 
@@ -2606,4 +2608,8 @@ int strncasecmp(const char *str1, const char *str2, size_t len)
 	return _strnicmp(str1, str2, len);
 }
 #endif
+#else
+#include "rwcore.h"
+RwUInt32 gGameState;
+int _dwMemAvailPhys = 1000000;
 #endif

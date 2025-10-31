@@ -61,6 +61,7 @@ int _caserename(const char *old_filename, const char *new_filename);
 #endif
 
 #ifdef RW_GL3
+#include <GLFW/glfw3.h>
 typedef struct
 {
     GLFWwindow* window;
