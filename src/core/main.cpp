@@ -194,7 +194,7 @@ ValidateVersion()
 	}
 
 	LoadingScreen("Invalid version", NULL, NULL);
-	
+
 	while(true)
 	{
 		;

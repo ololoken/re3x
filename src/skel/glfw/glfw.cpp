@@ -60,6 +60,10 @@ long _dwOperatingSystemVersion;
 #include <GLFW/glfw3native.h>
 #endif
 
+#if __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #ifdef _WIN32
 #define GLFW_EXPOSE_NATIVE_WIN32
 #include <GLFW/glfw3native.h>
@@ -871,9 +875,9 @@ psSelectDevice()
 			//printf("WARNING: Cannot find desired video mode, selecting device cancelled\n");
 			//return FALSE;
 			//todo: (ololoken) fixme
-			bestFsMode = 1;
+			bestFsMode = 0;
 			bestWidth = 800;
-			bestHeight = 640;
+			bestHeight = 600;
 			bestDepth = 32;
 		}
 		GcurSelVM = bestFsMode;
@@ -1897,6 +1901,243 @@ WinMain(HINSTANCE instance,
 #endif
 
 #else
+
+static void main_loop()
+{
+#if __EMSCRIPTEN__
+	if (RsGlobal.quit || FrontEndMenuManager.m_bWantToRestart || glfwWindowShouldClose(PSGLOBAL(window))) {
+		emscripten_cancel_main_loop();
+		return;
+	}
+#endif
+	glfwPollEvents();
+#ifdef GET_KEYBOARD_INPUT_FROM_X11
+	checkKeyPresses();
+#endif
+#ifndef MASTER
+	if (gbModelViewer) {
+		// This is TheModelViewerCore in LCS
+		TheModelViewer();
+	} else
+#endif
+	if ( ForegroundApp )
+	{
+		switch ( gGameState )
+		{
+			case GS_START_UP:
+			{
+#ifdef NO_MOVIES
+				gGameState = GS_INIT_ONCE;
+#else
+				gGameState = GS_INIT_LOGO_MPEG;
+#endif
+				TRACE("gGameState = GS_INIT_ONCE");
+				break;
+			}
+
+		    case GS_INIT_LOGO_MPEG:
+			{
+			    //if (!startupDeactivate)
+				//    PlayMovieInWindow(cmdShow, "movies\\Logo.mpg");
+			    gGameState = GS_LOGO_MPEG;
+			    TRACE("gGameState = GS_LOGO_MPEG;");
+			    break;
+		    }
+
+		    case GS_LOGO_MPEG:
+			{
+//					    CPad::UpdatePads();
+
+//					    if (startupDeactivate || ControlsManager.GetJoyButtonJustDown() != 0)
+				    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetLeftMouseJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetEnterJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetCharJustDown(' '))
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetAltJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetTabJustDown())
+//						    ++gGameState;
+
+			    break;
+		    }
+
+		    case GS_INIT_INTRO_MPEG:
+			{
+//#ifndef NO_MOVIES
+//					    CloseClip();
+//					    CoUninitialize();
+//#endif
+//
+//					    if (CMenuManager::OS_Language == LANG_FRENCH || CMenuManager::OS_Language == LANG_GERMAN)
+//						    PlayMovieInWindow(cmdShow, "movies\\GTAtitlesGER.mpg");
+//					    else
+//						    PlayMovieInWindow(cmdShow, "movies\\GTAtitles.mpg");
+
+			    gGameState = GS_INTRO_MPEG;
+			    TRACE("gGameState = GS_INTRO_MPEG;");
+			    break;
+		    }
+
+		    case GS_INTRO_MPEG:
+			{
+//					    CPad::UpdatePads();
+//
+//					    if (startupDeactivate || ControlsManager.GetJoyButtonJustDown() != 0)
+				    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetLeftMouseJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetEnterJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetCharJustDown(' '))
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetAltJustDown())
+//						    ++gGameState;
+//					    else if (CPad::GetPad(0)->GetTabJustDown())
+//						    ++gGameState;
+
+			    break;
+		    }
+
+			case GS_INIT_ONCE:
+			{
+				//CoUninitialize();
+
+#ifdef PS2_MENU
+				extern char version_name[64];
+				if ( CGame::frenchGame || CGame::germanGame )
+					LoadingScreen(NULL, version_name, "loadsc24");
+				else
+					LoadingScreen(NULL, version_name, "loadsc0");
+
+				printf("Into TheGame!!!\n");
+#else
+				LoadingScreen(nil, nil, "loadsc0");
+				// LoadingScreen(nil, nil, "loadsc0"); // duplicate
+#endif
+				if ( !CGame::InitialiseOnceAfterRW() )
+					RsGlobal.quit = TRUE;
+
+#ifdef PS2_MENU
+				gGameState = GS_INIT_PLAYING_GAME;
+#else
+				gGameState = GS_INIT_FRONTEND;
+				TRACE("gGameState = GS_INIT_FRONTEND;");
+#endif
+				break;
+			}
+#ifndef PS2_MENU
+			case GS_INIT_FRONTEND:
+			{
+				LoadingScreen(nil, nil, "loadsc0");
+				// LoadingScreen(nil, nil, "loadsc0"); // duplicate
+
+				FrontEndMenuManager.m_bGameNotLoaded = true;
+
+				FrontEndMenuManager.m_bStartUpFrontEndRequested = true;
+
+				if ( defaultFullscreenRes )
+				{
+					defaultFullscreenRes = FALSE;
+					FrontEndMenuManager.m_nPrefsVideoMode = GcurSelVM;
+					FrontEndMenuManager.m_nDisplayVideoMode = GcurSelVM;
+				}
+
+				gGameState = GS_FRONTEND;
+				TRACE("gGameState = GS_FRONTEND;");
+				break;
+			}
+
+			case GS_FRONTEND:
+			{
+				if(!WindowIconified)
+					RsEventHandler(rsFRONTENDIDLE, nil);
+
+#ifdef PS2_MENU
+				if ( !FrontEndMenuManager.m_bMenuActive || TheMemoryCard.m_bWantToLoad )
+#else
+				if ( !FrontEndMenuManager.m_bMenuActive || FrontEndMenuManager.m_bWantToLoad )
+#endif
+				{
+					gGameState = GS_INIT_PLAYING_GAME;
+					TRACE("gGameState = GS_INIT_PLAYING_GAME;");
+				}
+
+#ifdef PS2_MENU
+				if (TheMemoryCard.m_bWantToLoad )
+#else
+				if ( FrontEndMenuManager.m_bWantToLoad )
+#endif
+				{
+					InitialiseGame();
+					FrontEndMenuManager.m_bGameNotLoaded = false;
+					gGameState = GS_PLAYING_GAME;
+					TRACE("gGameState = GS_PLAYING_GAME;");
+				}
+				break;
+			}
+#endif
+
+			case GS_INIT_PLAYING_GAME:
+			{
+#ifdef PS2_MENU
+				CGame::Initialise("DATA\\GTA3.DAT");
+
+				//LoadingScreen("Starting Game", NULL, GetRandomSplashScreen());
+
+				if (   TheMemoryCard.CheckCardInserted(CARD_ONE) == CMemoryCard::NO_ERR_SUCCESS
+					&& TheMemoryCard.ChangeDirectory(CARD_ONE, TheMemoryCard.Cards[CARD_ONE].dir)
+					&& TheMemoryCard.FindMostRecentFileName(CARD_ONE, TheMemoryCard.MostRecentFile) == true
+					&& TheMemoryCard.CheckDataNotCorrupt(TheMemoryCard.MostRecentFile))
+				{
+					strcpy(TheMemoryCard.LoadFileName, TheMemoryCard.MostRecentFile);
+					TheMemoryCard.b_FoundRecentSavedGameWantToLoad = true;
+
+					if (CMenuManager::m_PrefsLanguage != TheMemoryCard.GetLanguageToLoad())
+					{
+						CMenuManager::m_PrefsLanguage = TheMemoryCard.GetLanguageToLoad();
+						TheText.Unload();
+						TheText.Load();
+					}
+
+					CGame::currLevel = (eLevelName)TheMemoryCard.GetLevelToLoad();
+				}
+#else
+				InitialiseGame();
+
+				FrontEndMenuManager.m_bGameNotLoaded = false;
+#endif
+				gGameState = GS_PLAYING_GAME;
+				TRACE("gGameState = GS_PLAYING_GAME;");
+				break;
+			}
+
+			case GS_PLAYING_GAME:
+			{
+				float ms = (float)CTimer::GetCurrentTimeInCycles() / (float)CTimer::GetCyclesPerMillisecond();
+				if ( RwInitialised )
+				{
+					if (!FrontEndMenuManager.m_PrefsFrameLimiter || (1000.0f / (float)RsGlobal.maxFPS) < ms)
+						RsEventHandler(rsIDLE, (void *)TRUE);
+				}
+				break;
+			}
+		}
+	}
+	else
+	{
+		if ( RwCameraBeginUpdate(Scene.camera) )
+		{
+			RwCameraEndUpdate(Scene.camera);
+			ForegroundApp = TRUE;
+			RsEventHandler(rsACTIVATE, (void *)TRUE);
+		}
+
+	}
+}
+
 int
 main(int argc, char *argv[])
 {
@@ -2086,15 +2327,15 @@ main(int argc, char *argv[])
 	while ( TRUE )
 	{
 		RwInitialised = TRUE;
-		
-		/* 
+
+		/*
 		* Set the initial mouse position...
 		*/
 		pos.x = RsGlobal.maximumWidth * 0.5f;
 		pos.y = RsGlobal.maximumHeight * 0.5f;
 
 		RsMouseSetPos(&pos);
-		
+
 		/*
 		* Enter the message processing loop...
 		*/
@@ -2114,270 +2355,48 @@ main(int argc, char *argv[])
 #ifdef PS2_MENU
 		if (TheMemoryCard.m_bWantToLoad)
 			LoadSplash(GetLevelSplashScreen(CGame::currLevel));
-		
+
 		TheMemoryCard.m_bWantToLoad = false;
-		
+
 		CTimer::Update();
-		
+
 		while( !RsGlobal.quit && !(FrontEndMenuManager.m_bWantToRestart || TheMemoryCard.b_FoundRecentSavedGameWantToLoad) && !glfwWindowShouldClose(PSGLOBAL(window)) )
+			main_loop();
+#else
+#if __EMSCRIPTEN__
+		emscripten_set_main_loop(main_loop, 0, true);
 #else
 		while( !RsGlobal.quit && !FrontEndMenuManager.m_bWantToRestart && !glfwWindowShouldClose(PSGLOBAL(window)))
+			main_loop();
 #endif
-		{
-			glfwPollEvents();
-#ifdef GET_KEYBOARD_INPUT_FROM_X11
-			checkKeyPresses();
 #endif
-#ifndef MASTER
-			if (gbModelViewer) {
-				// This is TheModelViewerCore in LCS
-				TheModelViewer();
-			} else
-#endif
-			if ( ForegroundApp )
-			{
-				switch ( gGameState )
-				{
-					case GS_START_UP:
-					{
-#ifdef NO_MOVIES
-						gGameState = GS_INIT_ONCE;
-#else
-						gGameState = GS_INIT_LOGO_MPEG;
-#endif
-						TRACE("gGameState = GS_INIT_ONCE");
-						break;
-					}
 
-				    case GS_INIT_LOGO_MPEG:
-					{
-					    //if (!startupDeactivate)
-						//    PlayMovieInWindow(cmdShow, "movies\\Logo.mpg");
-					    gGameState = GS_LOGO_MPEG;
-					    TRACE("gGameState = GS_LOGO_MPEG;");
-					    break;
-				    }
 
-				    case GS_LOGO_MPEG:
-					{
-//					    CPad::UpdatePads();
-
-//					    if (startupDeactivate || ControlsManager.GetJoyButtonJustDown() != 0)
-						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetLeftMouseJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetEnterJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetCharJustDown(' '))
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetAltJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetTabJustDown())
-//						    ++gGameState;
-
-					    break;
-				    }
-
-				    case GS_INIT_INTRO_MPEG:
-					{
-//#ifndef NO_MOVIES
-//					    CloseClip();
-//					    CoUninitialize();
-//#endif
-//
-//					    if (CMenuManager::OS_Language == LANG_FRENCH || CMenuManager::OS_Language == LANG_GERMAN)
-//						    PlayMovieInWindow(cmdShow, "movies\\GTAtitlesGER.mpg");
-//					    else
-//						    PlayMovieInWindow(cmdShow, "movies\\GTAtitles.mpg");
-
-					    gGameState = GS_INTRO_MPEG;
-					    TRACE("gGameState = GS_INTRO_MPEG;");
-					    break;
-				    }
-
-				    case GS_INTRO_MPEG:
-					{
-//					    CPad::UpdatePads();
-//
-//					    if (startupDeactivate || ControlsManager.GetJoyButtonJustDown() != 0)
-						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetLeftMouseJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetEnterJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetCharJustDown(' '))
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetAltJustDown())
-//						    ++gGameState;
-//					    else if (CPad::GetPad(0)->GetTabJustDown())
-//						    ++gGameState;
-
-					    break;
-				    }
-
-					case GS_INIT_ONCE:
-					{
-						//CoUninitialize();
-						
-#ifdef PS2_MENU
-						extern char version_name[64];
-						if ( CGame::frenchGame || CGame::germanGame )
-							LoadingScreen(NULL, version_name, "loadsc24");
-						else
-							LoadingScreen(NULL, version_name, "loadsc0");
-						
-						printf("Into TheGame!!!\n");
-#else				
-						LoadingScreen(nil, nil, "loadsc0");
-						// LoadingScreen(nil, nil, "loadsc0"); // duplicate
-#endif
-						if ( !CGame::InitialiseOnceAfterRW() )
-							RsGlobal.quit = TRUE;
-						
-#ifdef PS2_MENU
-						gGameState = GS_INIT_PLAYING_GAME;
-#else
-						gGameState = GS_INIT_FRONTEND;
-						TRACE("gGameState = GS_INIT_FRONTEND;");
-#endif
-						break;
-					}
-#ifndef PS2_MENU
-					case GS_INIT_FRONTEND:
-					{
-						LoadingScreen(nil, nil, "loadsc0");
-						// LoadingScreen(nil, nil, "loadsc0"); // duplicate
-						
-						FrontEndMenuManager.m_bGameNotLoaded = true;
-						
-						FrontEndMenuManager.m_bStartUpFrontEndRequested = true;
-						
-						if ( defaultFullscreenRes )
-						{
-							defaultFullscreenRes = FALSE;
-							FrontEndMenuManager.m_nPrefsVideoMode = GcurSelVM;
-							FrontEndMenuManager.m_nDisplayVideoMode = GcurSelVM;
-						}
-						
-						gGameState = GS_FRONTEND;
-						TRACE("gGameState = GS_FRONTEND;");
-						break;
-					}
-					
-					case GS_FRONTEND:
-					{
-						if(!WindowIconified)
-							RsEventHandler(rsFRONTENDIDLE, nil);
-
-#ifdef PS2_MENU
-						if ( !FrontEndMenuManager.m_bMenuActive || TheMemoryCard.m_bWantToLoad )
-#else
-						if ( !FrontEndMenuManager.m_bMenuActive || FrontEndMenuManager.m_bWantToLoad )
-#endif
-						{
-							gGameState = GS_INIT_PLAYING_GAME;
-							TRACE("gGameState = GS_INIT_PLAYING_GAME;");
-						}
-
-#ifdef PS2_MENU
-						if (TheMemoryCard.m_bWantToLoad )
-#else
-						if ( FrontEndMenuManager.m_bWantToLoad )
-#endif
-						{
-							InitialiseGame();
-							FrontEndMenuManager.m_bGameNotLoaded = false;
-							gGameState = GS_PLAYING_GAME;
-							TRACE("gGameState = GS_PLAYING_GAME;");
-						}
-						break;
-					}
-#endif
-					
-					case GS_INIT_PLAYING_GAME:
-					{
-#ifdef PS2_MENU
-						CGame::Initialise("DATA\\GTA3.DAT");
-						
-						//LoadingScreen("Starting Game", NULL, GetRandomSplashScreen());
-					
-						if (   TheMemoryCard.CheckCardInserted(CARD_ONE) == CMemoryCard::NO_ERR_SUCCESS
-							&& TheMemoryCard.ChangeDirectory(CARD_ONE, TheMemoryCard.Cards[CARD_ONE].dir)
-							&& TheMemoryCard.FindMostRecentFileName(CARD_ONE, TheMemoryCard.MostRecentFile) == true
-							&& TheMemoryCard.CheckDataNotCorrupt(TheMemoryCard.MostRecentFile))
-						{
-							strcpy(TheMemoryCard.LoadFileName, TheMemoryCard.MostRecentFile);
-							TheMemoryCard.b_FoundRecentSavedGameWantToLoad = true;
-					
-							if (CMenuManager::m_PrefsLanguage != TheMemoryCard.GetLanguageToLoad())
-							{
-								CMenuManager::m_PrefsLanguage = TheMemoryCard.GetLanguageToLoad();
-								TheText.Unload();
-								TheText.Load();
-							}
-					
-							CGame::currLevel = (eLevelName)TheMemoryCard.GetLevelToLoad();
-						}
-#else
-						InitialiseGame();
-
-						FrontEndMenuManager.m_bGameNotLoaded = false;
-#endif
-						gGameState = GS_PLAYING_GAME;
-						TRACE("gGameState = GS_PLAYING_GAME;");
-						break;
-					}
-					
-					case GS_PLAYING_GAME:
-					{
-						float ms = (float)CTimer::GetCurrentTimeInCycles() / (float)CTimer::GetCyclesPerMillisecond();
-						if ( RwInitialised )
-						{
-							if (!FrontEndMenuManager.m_PrefsFrameLimiter || (1000.0f / (float)RsGlobal.maxFPS) < ms)
-								RsEventHandler(rsIDLE, (void *)TRUE);
-						}
-						break;
-					}
-				}
-			}
-			else
-			{
-				if ( RwCameraBeginUpdate(Scene.camera) )
-				{
-					RwCameraEndUpdate(Scene.camera);
-					ForegroundApp = TRUE;
-					RsEventHandler(rsACTIVATE, (void *)TRUE);
-				}
-				
-			}
-		}
-
-		
-		/* 
+		/*
 		* About to shut down - block resize events again...
 		*/
 		RwInitialised = FALSE;
-		
+
 		FrontEndMenuManager.UnloadTextures();
-#ifdef PS2_MENU	
+#ifdef PS2_MENU
 		if ( !(FrontEndMenuManager.m_bWantToRestart || TheMemoryCard.b_FoundRecentSavedGameWantToLoad))
 			break;
 #else
 		if ( !FrontEndMenuManager.m_bWantToRestart )
 			break;
 #endif
-		
+
 		CPad::ResetCheats();
 		CPad::StopPadsShaking();
-		
+
 		DMAudio.ChangeMusicMode(MUSICMODE_DISABLE);
-		
+
 #ifdef PS2_MENU
 		CGame::ShutDownForRestart();
 #endif
-		
+
 		CTimer::Stop();
-		
+
 #ifdef PS2_MENU
 		if (FrontEndMenuManager.m_bWantToRestart || TheMemoryCard.b_FoundRecentSavedGameWantToLoad)
 		{
@@ -2390,13 +2409,13 @@ main(int argc, char *argv[])
 			CGame::InitialiseWhenRestarting();
 			DMAudio.ChangeMusicMode(MUSICMODE_GAME);
 			FrontEndMenuManager.m_bWantToRestart = false;
-			
+
 			continue;
 		}
-		
-		CGame::ShutDown();	
+
+		CGame::ShutDown();
 		CTimer::Stop();
-		
+
 		break;
 #else
 		if ( FrontEndMenuManager.m_bWantToLoad )
@@ -2416,9 +2435,9 @@ main(int argc, char *argv[])
 #endif
 			if ( gGameState == GS_PLAYING_GAME )
 				CGame::ShutDown();
-			
+
 			CTimer::Stop();
-			
+
 			if ( FrontEndMenuManager.m_bFirstTime == true )
 			{
 				gGameState = GS_INIT_FRONTEND;
@@ -2430,7 +2449,7 @@ main(int argc, char *argv[])
 				TRACE("gGameState = GS_INIT_PLAYING_GAME;");
 			}
 		}
-		
+
 		FrontEndMenuManager.m_bFirstTime = false;
 		FrontEndMenuManager.m_bWantToRestart = false;
 #endif

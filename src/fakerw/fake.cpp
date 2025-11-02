@@ -1,11 +1,13 @@
 #define _CRT_SECURE_NO_WARNINGS
 #define WITH_D3D // not WITHD3D, so it's librw define
-#include <rwcore.h>
-#include <rpworld.h>
-#include <rpmatfx.h>
-#include <rphanim.h>
-#include <rpskin.h>
+#include "common.h"
+
 #include <assert.h>
+#include <rphanim.h>
+#include <rpmatfx.h>
+#include <rpskin.h>
+#include <rpworld.h>
+#include <rwcore.h>
 #include <string.h>
 #ifndef _WIN32
 #include "crossplatform.h"
