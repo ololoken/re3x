@@ -318,7 +318,7 @@ RsRwInitialize(void *displayID)
 	 * Install any platform specific file systems...
 	 */
 	psInstallFileSystem();
-	
+
 	/*
 	 * Initialize debug message handling...
 	 */

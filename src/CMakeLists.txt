@@ -29,12 +29,8 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
             "${CMAKE_SOURCE_DIR}/vendor/openal-soft/include"
     )
     set(USE_FLAGS "-pthread \
-  --use-port=sdl2 \
-  --use-port=sdl2_image:formats=bmp,png \
-  --use-port=sdl2_mixer -sSDL2_MIXER_FORMATS=mp3,ogg \
-  --use-port=sdl2_ttf \
-  --use-port=contrib.glfw3 \
-  --use-port=zlib -g -gsource-map -sASSERTIONS=2 --profiling-funcs")
+        --use-port=contrib.glfw3 \
+        --use-port=zlib -g -gsource-map -sASSERTIONS=2 --profiling-funcs")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${USE_FLAGS} -Wno-missing-template-arg-list-after-template-kw")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${USE_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${USE_FLAGS} \
@@ -43,7 +39,6 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   -sSTACK_SIZE=1024kb \
   -sENVIRONMENT=web,worker \
   -sPTHREAD_POOL_SIZE=4 -sPTHREAD_POOL_SIZE_STRICT=0 \
-  -sFULL_ES2 -sMAX_WEBGL_VERSION=2 \
   -sMODULARIZE \
   -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency \
   -sEXPORT_ALL \

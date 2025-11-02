@@ -1098,7 +1098,7 @@ void psPostRWinit(void)
 RwBool _psSetVideoMode(RwInt32 subSystem, RwInt32 videoMode)
 {
 	RwInitialised = FALSE;
-	
+
 	RsEventHandler(rsRWTERMINATE, nil);
 	
 	GcurSel = subSystem;
@@ -1106,8 +1106,9 @@ RwBool _psSetVideoMode(RwInt32 subSystem, RwInt32 videoMode)
 	
 	useDefault = TRUE;
 	
-	if ( RsEventHandler(rsRWINITIALIZE, &openParams) == rsEVENTERROR )
+	if ( RsEventHandler(rsRWINITIALIZE, &openParams) == rsEVENTERROR ) {
 		return FALSE;
+	}
 
 	RwInitialised = TRUE;
 	useDefault = FALSE;
