@@ -30,6 +30,7 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
     )
     set(USE_FLAGS "-pthread \
         --use-port=contrib.glfw3 \
+        --use-port=sdl2 \
         --use-port=zlib -g -gsource-map -sASSERTIONS=2 --profiling-funcs")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${USE_FLAGS} -Wno-missing-template-arg-list-after-template-kw")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${USE_FLAGS}")

@@ -634,7 +634,12 @@ CMenuManager::CentreMousePointer()
 		ClientToScreen(PSGLOBAL(window), &Point);
 		SetCursorPos(Point.x, Point.y);
 #elif defined RW_GL3
+#if LIBRW_GLFW
 		glfwSetCursorPos(PSGLOBAL(window), SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+#elif LIBRW_SDL2
+		SDL_WarpMouseInWindow(PSGLOBAL(window), SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2);
+#endif
+
 #endif
 
 		PSGLOBAL(lastMousePos.x) = SCREEN_WIDTH / 2;
@@ -4946,12 +4951,14 @@ CMenuManager::ProcessUserInput(uint8 goDown, uint8 goUp, uint8 optionSelected, u
 						PSGLOBAL(joy1)->GetCapabilities(&devCaps);
 						ControlsManager.InitDefaultControlConfigJoyPad(devCaps.dwButtons);
 					}
-#else
+#elif LIBRW_GLFW
 					if (PSGLOBAL(joy1id) != -1 && glfwJoystickPresent(PSGLOBAL(joy1id))) {
 						int count;
 						glfwGetJoystickButtons(PSGLOBAL(joy1id), &count);
 						ControlsManager.InitDefaultControlConfigJoyPad(count);
 					}
+#elif LIBRW_SDL2
+	//todo: (ololoken) add me
 #endif
 					MousePointerStateHelper.bInvertVertically = true;
 					TheCamera.m_bHeadBob = false;

@@ -220,7 +220,9 @@ void MultiSamplingButtonPress(int8 action) {
 	if (action == FEOPTION_ACTION_SELECT) {
 		if (FrontEndMenuManager.m_nDisplayMSAALevel != FrontEndMenuManager.m_nPrefsMSAALevel) {
 			FrontEndMenuManager.m_nPrefsMSAALevel = FrontEndMenuManager.m_nDisplayMSAALevel;
+#if LIBRW_GLFW
 			_psSelectScreenVM(FrontEndMenuManager.m_nPrefsVideoMode);
+#endif
 			DMAudio.ChangeMusicMode(MUSICMODE_FRONTEND);
 			DMAudio.Service();
 			FrontEndMenuManager.SetHelperText(0);
@@ -283,7 +285,9 @@ wchar* MultiSamplingDraw(bool *disabled, bool userHovering) {
 const char* screenModes[] = { "FED_FLS", "FED_WND" };
 void ScreenModeAfterChange(int8 before, int8 after)
 {
+#if LIBRW_GLFW
 	_psSelectScreenVM(FrontEndMenuManager.m_nPrefsVideoMode); // apply same resolution
+#endif
 	DMAudio.ChangeMusicMode(MUSICMODE_FRONTEND);
 	DMAudio.Service();
 	FrontEndMenuManager.SetHelperText(0);

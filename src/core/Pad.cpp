@@ -865,8 +865,14 @@ CMouseControllerState CMousePointerStateHelper::GetMouseSetUp()
 #else
 	// It seems there is no way to get number of buttons on mouse, so assign all buttons if we have mouse.
 	double xpos = 1.0f, ypos;
+#if LIBRW_GLFW
 	glfwGetCursorPos(PSGLOBAL(window), &xpos, &ypos);
-
+#elif LIBRW_SDL2
+	int sdl_x = 0, sdl_y = 0;
+	SDL_GetMouseState(&sdl_x, &sdl_y);
+	xpos = (double)sdl_x;
+	ypos = (double)sdl_y;
+#endif
 	if (xpos != 0.f) {
 		state.MMB = true;
 		state.RMB = true;
@@ -925,7 +931,14 @@ void CPad::UpdateMouse()
 	if ( IsForegroundApp() && PSGLOBAL(cursorIsInWindow) )
 	{
 		double xpos = 1.0f, ypos;
+#if LIBRW_GLFW
 		glfwGetCursorPos(PSGLOBAL(window), &xpos, &ypos);
+#elif LIBRW_SDL2
+		int sdl_x = 0, sdl_y = 0;
+		SDL_GetMouseState(&sdl_x, &sdl_y);
+		xpos = (double)sdl_x;
+		ypos = (double)sdl_y;
+#endif
 		if (xpos == 0.f)
 			return;
 
@@ -944,12 +957,20 @@ void CPad::UpdateMouse()
 
 		PCTempMouseControllerState.x = (float)(signX * (xpos - PSGLOBAL(lastMousePos.x)));
 		PCTempMouseControllerState.y = (float)(signy * (ypos - PSGLOBAL(lastMousePos.y)));
+#if LIBRW_GLFW
 		PCTempMouseControllerState.LMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_LEFT);
 		PCTempMouseControllerState.RMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_RIGHT);
 		PCTempMouseControllerState.MMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_MIDDLE);
 		PCTempMouseControllerState.MXB1 = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_4);
 		PCTempMouseControllerState.MXB2 = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_5);
-
+#elif LIBRW_SDL2
+		uint32 buttonState = SDL_GetMouseState(NULL, NULL);
+		PCTempMouseControllerState.LMB = buttonState & SDL_BUTTON(SDL_BUTTON_LEFT);
+		PCTempMouseControllerState.RMB = buttonState & SDL_BUTTON(SDL_BUTTON_RIGHT);
+		PCTempMouseControllerState.MMB = buttonState & SDL_BUTTON(SDL_BUTTON_MIDDLE);
+		PCTempMouseControllerState.MXB1 = buttonState & SDL_BUTTON(SDL_BUTTON_X1);
+		PCTempMouseControllerState.MXB2 = buttonState & SDL_BUTTON(SDL_BUTTON_X2);
+#endif
 		if (PSGLOBAL(mouseWheel) > 0)
 			PCTempMouseControllerState.WHEELUP = 1;
 		else if (PSGLOBAL(mouseWheel) < 0)

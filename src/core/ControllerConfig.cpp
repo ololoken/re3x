@@ -45,6 +45,7 @@ void CControllerConfigManager::MakeControllerActionsBlank()
 
 #ifdef RW_GL3
 int MapIdToButtonId(int mapId) {
+#if LIBRW_GL3
 	switch (mapId) {
 		case GLFW_GAMEPAD_BUTTON_A: // Cross
 			return 2;
@@ -82,6 +83,9 @@ int MapIdToButtonId(int mapId) {
 		default:
 			return 0;
 	}
+#elif LIBRW_SDL2
+	//todo: (ololoken) implement me
+#endif
 }
 #endif
 
@@ -2803,6 +2807,7 @@ void CControllerConfigManager::UpdateJoyButtonState(int32 padnumber)
 			m_aButtonStates[i] = false;
 	}
 #elif defined RW_GL3
+#if LIBRW_GLFW
 	if (m_NewState.isGamepad) {
 		for (int32 i = 0; i < MAX_BUTTONS; i++) {
 			if (i == GLFW_GAMEPAD_BUTTON_GUIDE)
@@ -2815,6 +2820,9 @@ void CControllerConfigManager::UpdateJoyButtonState(int32 padnumber)
 			m_aButtonStates[i] = m_NewState.buttons[i];
 		}
 	}
+#elif LIBRW_SDL2
+	//todo: (ololoken) implement me
+#endif
 #endif
 }
 
