@@ -11,6 +11,9 @@
 DWORD _dwOperatingSystemVersion;
 #include "resource.h"
 #else
+#if __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 long _dwOperatingSystemVersion;
 #ifndef __SWITCH__
 #ifndef __APPLE__
@@ -261,6 +264,9 @@ psTimer(void)
 double
 psTimer(void)
 {
+#if __EMSCRIPTEN__
+	return emscripten_get_now();
+#else
 	struct timespec start; 
 #if defined(CLOCK_MONOTONIC_RAW)
 	clock_gettime(CLOCK_MONOTONIC_RAW, &start);
@@ -270,6 +276,7 @@ psTimer(void)
 	clock_gettime(CLOCK_MONOTONIC, &start);
 #endif
 	return start.tv_sec * 1000.0 + start.tv_nsec/1000000.0;
+#endif
 }
 #endif       
 
@@ -1907,8 +1914,8 @@ static void main_loop()
 {
 #if __EMSCRIPTEN__
 	if (RsGlobal.quit || FrontEndMenuManager.m_bWantToRestart || glfwWindowShouldClose(PSGLOBAL(window))) {
-		emscripten_cancel_main_loop();
-		return;
+		//emscripten_cancel_main_loop();
+		//return;
 	}
 #endif
 	glfwPollEvents();
