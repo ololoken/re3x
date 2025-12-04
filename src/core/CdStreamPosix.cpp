@@ -58,12 +58,20 @@ re3_sem_close(sem_t* sem)
 sem_t*
 re3_sem_open(const char* format, ...)
 {
+
 	char semName[21];
 	va_list va;
 	va_start(va, format);
 	vsprintf(semName, format, va);
-
+#if NAMED_SEMAPHORES
 	return sem_open(semName, O_CREAT, 0644, 1);
+#else
+	auto re3Sem = new sem_t;
+	if (0 != sem_init(re3Sem, 0, 0)) {
+		debug("Failed to init %s legacy semaphore\n", semName);
+	}
+	return re3Sem;
+#endif
 }
 
 #define RE3_SEM_CLOSE re3_sem_close
@@ -509,7 +517,7 @@ void *CdStreamThread(void *param)
 		pChannel->nSectorsToRead = 0;
 		if ( pChannel->bLocked )
 		{
-			pChannel->bLocked = 0;
+			pChannel->bLocked = false;
 			sem_post(pChannel->pDoneSemaphore);
 		}
 		pChannel->bReading = false;
