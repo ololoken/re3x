@@ -39,11 +39,15 @@ ALDeviceList::ALDeviceList()
 	nNumOfDevices = 0;
 
 	defaultDeviceIndex = 0;
-
+#ifndef __EMSCRIPTEN__
 	if (alcIsExtensionPresent(NULL, "ALC_ENUMERATION_EXT")) {
 		devices = (char *)alcGetString(NULL, ALC_ALL_DEVICES_SPECIFIER);
 		defaultDeviceName = (char *)alcGetString(NULL, ALC_DEFAULT_ALL_DEVICES_SPECIFIER);
-		
+
+#else
+	devices = (char *)alcGetString(NULL, ALC_DEFAULT_DEVICE_SPECIFIER);
+	defaultDeviceName = (char *)alcGetString(NULL, ALC_DEFAULT_DEVICE_SPECIFIER);
+#endif
 		index = 0;
 		// go through device list (each device terminated with a single NULL, list terminated with double NULL)
 		while (*devices != '\0') {
@@ -56,7 +60,11 @@ ALDeviceList::ALDeviceList()
 				if (context) {
 					alcMakeContextCurrent(context);
 					// if new actual device name isn't already in the list, then add it...
+#ifndef __EMSCRIPTEN__
 					actualDeviceName = alcGetString(device, ALC_ALL_DEVICES_SPECIFIER);
+#else
+					actualDeviceName = alcGetString(device, ALC_DEFAULT_DEVICE_SPECIFIER);
+#endif
 					if ((actualDeviceName != NULL) && (strlen(actualDeviceName) > 0)) {
 						ALDEVICEINFO &ALDeviceInfo = aDeviceInfo[nNumOfDevices++];
 						ALDeviceInfo.bSelected = true;
@@ -102,7 +110,9 @@ ALDeviceList::ALDeviceList()
 			devices += strlen(devices) + 1;
 			index += 1;
 		}
+#ifndef __EMSCRIPTEN__
 	}
+#endif
 
 	ResetFilters();
 }

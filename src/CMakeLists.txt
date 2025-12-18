@@ -28,23 +28,26 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
     include_directories(
             "${CMAKE_SOURCE_DIR}/vendor/openal-soft/include"
     )
-    set(USE_FLAGS "-pthread \
+    set(USE_FLAGS " \
         --use-port=contrib.glfw3 \
         --use-port=zlib \
         --use-port=mpg123 \
-        -g -gsource-map -sASSERTIONS=2 --profiling-funcs -fdebug-prefix-map=/mnt=/Users")
+        -g -gsource-map -fdebug-prefix-map=/mnt=/Users")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${USE_FLAGS} -Wno-missing-template-arg-list-after-template-kw")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${USE_FLAGS}")
     set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${USE_FLAGS} \
+    -sASYNCIFY \
+    -sDYNCALLS \
   -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=512mb -sMEMORY_GROWTH_LINEAR_STEP=32mb \
   -sSTACK_SIZE=1024kb \
-  -sENVIRONMENT=web,worker \
+  -sENVIRONMENT=web \
   -sPTHREAD_POOL_SIZE=8 -sPTHREAD_POOL_SIZE_STRICT=0 \
   -sMODULARIZE \
   -sFULL_ES2 -sMIN_WEBGL_VERSION=2 \
   -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency \
   -sEXPORT_ALL \
   -sEXIT_RUNTIME \
+  -sASSERTIONS=2 --profiling-funcs \
   -lidbfs.js -sCASE_INSENSITIVE_FS -sASSERTIONS=2")
 endif ()
 

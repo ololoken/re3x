@@ -213,7 +213,7 @@ enum Config {
 
 // these are placed here to work with VANILLA_DEFINES for compatibility
 #define NO_CDCHECK // skip audio CD check
-#define DEFAULT_NATIVE_RESOLUTION // Set default video mode to your native resolution (fixes Windows 10 launch)
+//#define DEFAULT_NATIVE_RESOLUTION // Set default video mode to your native resolution (fixes Windows 10 launch)
 
 #ifdef VANILLA_DEFINES
 #if !defined(_WIN32) || defined(__LP64__) || defined(_WIN64)
@@ -308,7 +308,7 @@ enum Config {
 #define ASPECT_RATIO_SCALE	// Not just makes everything scale with aspect ratio, also adds support for all aspect ratios
 #define PROPER_SCALING		// use original DEFAULT_SCREEN_WIDTH/DEFAULT_SCREEN_HEIGHT from PS2 instead of PC(R* changed HEIGHT here to make radar look better, but broke other hud elements aspect ratio).
 #define DEFAULT_NATIVE_RESOLUTION	// Set default video mode to your native resolution (fixes Windows 10 launch)
-#define USE_TXD_CDIMAGE		// generate and load textures from txd.img
+//#define USE_TXD_CDIMAGE		// generate and load textures from txd.img
 #define PS2_ALPHA_TEST		// emulate ps2 alpha test
 #define IMPROVED_VIDEOMODE	// save and load videomode parameters instead of a magic number
 #define DISABLE_LOADING_SCREEN // disable the loading screen which vastly improves the loading time
@@ -440,18 +440,19 @@ static_assert(false, "SUPPORT_XBOX_SCRIPT and SUPPORT_MOBILE_SCRIPT are mutually
 // Audio
 #define EXTERNAL_3D_SOUND // use external engine to simulate 3d audio spatialization. OpenAL would not work without it (because it works in a 3d space
                           // originally and making it work in 2d only requires more resource). Will not work on PS2
-#define AUDIO_REFLECTIONS // Enable audio reflections. This is enabled in all vanilla versions
-#define AUDIO_REVERB // Enable audio reverb. It was disabled in PS2 and mobile versions
+//#define AUDIO_REFLECTIONS // Enable audio reflections. This is enabled in all vanilla versions
+//#define AUDIO_REVERB // Enable audio reverb. It was disabled in PS2 and mobile versions
 #define RADIO_SCROLL_TO_PREV_STATION // Won't work without FIX_BUGS
-#define AUDIO_CACHE // cache sound lengths to speed up the cold boot
-#define PS2_AUDIO_CHANNELS // increases the maximum number of audio channels to PS2 value of 43 (PC has 28 originally)
-#define PS2_AUDIO_PATHS // changes audio paths for cutscenes and radio to PS2 paths (needs vbdec on MSS builds)
+//#define AUDIO_CACHE // cache sound lengths to speed up the cold boot
+//#define PS2_AUDIO_CHANNELS // increases the maximum number of audio channels to PS2 value of 43 (PC has 28 originally)
+//#define PS2_AUDIO_PATHS // changes audio paths for cutscenes and radio to PS2 paths (needs vbdec on MSS builds)
 //#define AUDIO_OAL_USE_SNDFILE // use libsndfile to decode WAVs instead of our internal decoder
 #define AUDIO_OAL_USE_MPG123 // use mpg123 to support mp3 files
 #define PAUSE_RADIO_IN_FRONTEND // pause radio when game is paused
 #define ATTACH_RELEASING_SOUNDS_TO_ENTITIES // sounds would follow ped and vehicles coordinates if not being queued otherwise
 #define USE_TIME_SCALE_FOR_AUDIO // slow down/speed up sounds according to the speed of the game
-#define MULTITHREADED_AUDIO // for streams. requires C++11 or later
+//#define MULTITHREADED_AUDIO // for streams. requires C++11 or later
+
 
 #ifdef AUDIO_OPUS
 #define AUDIO_OAL_USE_OPUS // enable support of opus files
@@ -466,8 +467,8 @@ static_assert(false, "SUPPORT_XBOX_SCRIPT and SUPPORT_MOBILE_SCRIPT are mutually
 #endif
 
 // Streaming
-#if !defined(_WIN32) && !defined(__SWITCH__)
-	//#define ONE_THREAD_PER_CHANNEL // Don't use if you're not on SSD/Flash - also not utilized too much right now(see commented LoadAllRequestedModels in Streaming.cpp)
+#if !defined(_WIN32) && !defined(__SWITCH__) && !defined(__EMSCRIPTEN__)
+	#define ONE_THREAD_PER_CHANNEL // Don't use if you're not on SSD/Flash - also not utilized too much right now(see commented LoadAllRequestedModels in Streaming.cpp)
 	#define FLUSHABLE_STREAMING // Make it possible to interrupt reading when processing file isn't needed anymore.
 #endif
 #define BIG_IMG // Not complete - allows to read larger img files

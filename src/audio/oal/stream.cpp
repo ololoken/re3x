@@ -22,6 +22,9 @@
 
 #include <queue>
 #include <utility>
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #ifdef MULTITHREADED_AUDIO
 #include <iostream>
@@ -1492,6 +1495,9 @@ uint32 CStream::GetPosMS()
 
 	ALint offset;
 	//alGetSourcei(m_alSource, AL_SAMPLE_OFFSET, &offset);
+#ifdef __EMSCRIPTEN__
+	emscripten_sleep(1000);
+#endif
 	alGetSourcei(m_pAlSources[0], AL_BYTE_OFFSET, &offset);
 
 	//std::lock_guard<std::mutex> lock(m_mutex);

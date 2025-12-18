@@ -19,6 +19,10 @@
 #include <sys/syscall.h>
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 #include "CdStream.h"
 #include "rwcore.h"
 #include "MemoryMgr.h"
@@ -78,6 +82,7 @@ re3_sem_open(const char* format, ...)
 void
 re3_sem_close(sem_t* sem, const char* format, ...)
 {
+#ifndef __EMSCRIPTEN__
 	sem_close(sem);
 
 	char semName[21];
@@ -86,6 +91,7 @@ re3_sem_close(sem_t* sem, const char* format, ...)
 	vsprintf(semName, format, va);
 
 	sem_unlink(semName);
+#endif
 }
 
 #endif
@@ -129,6 +135,7 @@ int32 lastPosnRead;
 int _gdwCdStreamFlags;
 
 void *CdStreamThread(void* channelId);
+void CdStreamAsyncThread();
 
 void
 CdStreamInitThread(void)
@@ -190,8 +197,14 @@ CdStreamInitThread(void)
 #ifndef ONE_THREAD_PER_CHANNEL
 	debug("Using one streaming thread for all channels\n");
 	gCdStreamThreadStatus = 0;
+#ifndef __EMSCRIPTEN__
 	status = pthread_create(&_gCdStreamThread, NULL, CdStreamThread, nil);
-
+#else
+	status = EM_ASM_INT({
+		setInterval(() => dynCall('v', $0, []), 0);
+		return 0;
+	}, CdStreamAsyncThread);
+#endif
 	if (status == -1)
 	{
 		CDTRACE("failed to create sync thread");
@@ -322,7 +335,7 @@ CdStreamRead(int32 channel, void *buffer, uint32 offset, uint32 size)
 	pChannel->nSectorOffset = _GET_OFFSET(offset);
 	pChannel->nSectorsToRead = size;
 	pChannel->pBuffer = buffer;
-	pChannel->bLocked = 0;
+	pChannel->bLocked = false;
 
 #ifndef ONE_THREAD_PER_CHANNEL
 	AddToQueue(&gChannelRequestQ, channel);
@@ -407,7 +420,11 @@ CdStreamSync(int32 channel)
 	{
 		pChannel->bLocked = true;
 		while (pChannel->bLocked && pChannel->nSectorsToRead != 0){
+#ifndef __EMSCRIPTEN__
 			sem_wait(pChannel->pDoneSemaphore);
+#else
+			emscripten_sleep(0);
+#endif
 		}
 		pChannel->bLocked = false;
 	}
@@ -452,6 +469,42 @@ RemoveFirstInQueue(Queue *queue)
 	}
 
 	queue->head = (queue->head + 1) % queue->size;
+}
+
+void CdStreamAsyncThread()
+{
+	int32 channel = GetFirstInQueue(&gChannelRequestQ);
+	if (channel == -1) return;
+
+	CdReadInfo *pChannel = &gpReadInfo[channel];
+	ASSERT( pChannel != nil );
+
+	if(pChannel->nSectorsToRead == 0) return;
+
+	if ( pChannel->nStatus == STREAM_NONE )
+	{
+		ASSERT(pChannel->hFile >= 0);
+		ASSERT(pChannel->pBuffer != nil );
+
+		lseek(pChannel->hFile, (size_t)pChannel->nSectorOffset * (size_t)CDSTREAM_SECTOR_SIZE, SEEK_SET);
+		if (read(pChannel->hFile, pChannel->pBuffer, pChannel->nSectorsToRead * CDSTREAM_SECTOR_SIZE) == -1) {
+			// pChannel->nSectorsToRead == 0 at this point means we wanted to flush channel
+			// STREAM_WAITING is a little hack to make CStreaming not process this data
+			pChannel->nStatus = pChannel->nSectorsToRead == 0 ? STREAM_WAITING : STREAM_ERROR;
+		} else {
+			pChannel->nStatus = STREAM_NONE;
+		}
+	}
+
+	RemoveFirstInQueue(&gChannelRequestQ);
+
+	pChannel->nSectorsToRead = 0;
+	if ( pChannel->bLocked )
+	{
+		pChannel->bLocked = false;
+		sem_post(pChannel->pDoneSemaphore);
+	}
+	pChannel->bReading = false;
 }
 
 void *CdStreamThread(void *param)

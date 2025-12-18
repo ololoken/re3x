@@ -1544,7 +1544,7 @@ Idle(void *arg)
 	tbStartTimer(0, "DMAudio.Service");
 	DMAudio.Service();
 	tbEndTimer("DMAudio.Service");
-
+#ifndef __EMSCRIPTEN__ // todo: (ololoken) check conditions here
 	if(CGame::bDemoMode && CTimer::GetTimeInMilliseconds() > (3*60 + 30)*1000 && !CCutsceneMgr::IsCutsceneProcessing()){
 		WANT_TO_LOAD = false;
 		FrontEndMenuManager.m_bWantToRestart = true;
@@ -1555,7 +1555,7 @@ Idle(void *arg)
 	{
 		return;
 	}
-	
+#endif
 	SetLightsWithTimeOfDayColour(Scene.world);
 
 	if(arg == nil)

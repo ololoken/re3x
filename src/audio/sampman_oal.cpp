@@ -765,8 +765,6 @@ cSampleManager::Initialise(void)
 	if ( _bSampmanInitialised )
 		return TRUE;
 
-	EFXInit();
-
 	for(int i = 0; i < MAX_STREAMS; i++)
 		aStream[i] = new CStream(ALStreamSources[i], ALStreamBuffers[i]);
 
@@ -853,7 +851,7 @@ cSampleManager::Initialise(void)
 		ASSERT(ALContext != NULL);
 		
 		alcMakeContextCurrent(ALContext);
-	
+		EFXInit();
 		const char* ext=(const char*)alGetString(AL_EXTENSIONS);
 		ASSERT(strstr(ext,"AL_SOFT_loop_points")!=NULL);
 		if ( strstr(ext,"AL_SOFT_loop_points")==NULL )
@@ -958,16 +956,16 @@ cSampleManager::Initialise(void)
 		}
 		
 		nSampleBankMemoryStartAddress[SFX_BANK_0] = (uintptr)malloc(nSampleBankSize[SFX_BANK_0]);
-		ASSERT(nSampleBankMemoryStartAddress[SFX_BANK_0] != 0);
+		/*ASSERT(nSampleBankMemoryStartAddress[SFX_BANK_0] != 0);
 		
 		if ( nSampleBankMemoryStartAddress[SFX_BANK_0] == 0 )
 		{
 			Terminate();
 			return FALSE;
-		}
+		}*/
 		
 		nSampleBankMemoryStartAddress[SFX_BANK_PED_COMMENTS] = (uintptr)malloc(PED_BLOCKSIZE*MAX_PEDSFX);
-		ASSERT(nSampleBankMemoryStartAddress[SFX_BANK_PED_COMMENTS] != 0);
+		//ASSERT(nSampleBankMemoryStartAddress[SFX_BANK_PED_COMMENTS] != 0);
 
 #ifdef FIX_BUGS
 		// Find biggest player comment
@@ -976,7 +974,7 @@ cSampleManager::Initialise(void)
 			nMaxPedSize = Max(nMaxPedSize, m_aSamples[i].nSize);
 
 		gPlayerTalkData = malloc(nMaxPedSize);
-		ASSERT(gPlayerTalkData != 0);
+		//ASSERT(gPlayerTalkData != 0);
 #endif
 
 		LoadSampleBank(SFX_BANK_0);
