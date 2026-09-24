@@ -1238,6 +1238,61 @@ CStream::CStream(ALuint *sources, ALuint (&buffers)[NUM_STREAMBUFFERS]) :
 {
 }
 
+static IDecoder *
+CreateSoundDecoder(const char *filename, uint32 overrideSampleRate)
+{
+	if (!strcasecmp(&filename[strlen(filename) - strlen(".wav")], ".wav"))
+#ifdef AUDIO_OAL_USE_SNDFILE
+		return new CSndFile(filename);
+#else
+		return new CWavFile(filename);
+#endif
+#ifdef AUDIO_OAL_USE_MPG123
+	else if (!strcasecmp(&filename[strlen(filename) - strlen(".mp3")], ".mp3"))
+		return new CMP3File(filename);
+	else if (!strcasecmp(&filename[strlen(filename) - strlen(".adf")], ".adf"))
+		return new CADFFile(filename);
+#endif
+	else if (!strcasecmp(&filename[strlen(filename) - strlen(".vb")], ".VB"))
+		return new CVbFile(filename, overrideSampleRate);
+#ifdef AUDIO_OAL_USE_OPUS
+	else if (!strcasecmp(&filename[strlen(filename) - strlen(".opus")], ".opus"))
+		return new COpusFile(filename);
+#endif
+	else
+		return nil;
+}
+
+static void
+BuildMp3Filename(const char *src, char *dst, size_t dstSize)
+{
+	strncpy(dst, src, dstSize - 1);
+	dst[dstSize - 1] = '\0';
+
+	size_t len = strlen(dst);
+	if (len == 0)
+		return;
+
+	char *dot = NULL;
+	for (size_t i = len - 1; i > 0; --i)
+	{
+		if (dst[i] == '.')
+		{
+			dot = &dst[i];
+			break;
+		}
+		if (dst[i] == '/' || dst[i] == '\\')
+			break;
+	}
+
+	if (dot)
+		*dot = '\0';
+	else if (strlen(dst) + 4 >= dstSize)
+		return;
+
+	strncat(dst, ".mp3", dstSize - strlen(dst) - 1);
+}
+
 bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 {
 	if (IsOpened()) return false;
@@ -1272,26 +1327,21 @@ bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 		
 	DEV("Stream %s\n", m_aFilename);
 
-	if (!strcasecmp(&m_aFilename[strlen(m_aFilename) - strlen(".wav")], ".wav"))
-#ifdef AUDIO_OAL_USE_SNDFILE
-		m_pSoundFile = new CSndFile(m_aFilename);
-#else
-		m_pSoundFile = new CWavFile(m_aFilename);
-#endif
-#ifdef AUDIO_OAL_USE_MPG123
-	else if (!strcasecmp(&m_aFilename[strlen(m_aFilename) - strlen(".mp3")], ".mp3"))
-		m_pSoundFile = new CMP3File(m_aFilename);
-	else if (!strcasecmp(&m_aFilename[strlen(m_aFilename) - strlen(".adf")], ".adf"))
-		m_pSoundFile = new CADFFile(m_aFilename);
-#endif
-	else if (!strcasecmp(&m_aFilename[strlen(m_aFilename) - strlen(".vb")], ".VB"))
-		m_pSoundFile = new CVbFile(m_aFilename, overrideSampleRate);
-#ifdef AUDIO_OAL_USE_OPUS
-	else if (!strcasecmp(&m_aFilename[strlen(m_aFilename) - strlen(".opus")], ".opus"))
-		m_pSoundFile = new COpusFile(m_aFilename);
-#endif
-	else 
-		m_pSoundFile = nil;
+	m_pSoundFile = CreateSoundDecoder(m_aFilename, overrideSampleRate);
+
+	if (!(m_pSoundFile && m_pSoundFile->IsOpened()))
+	{
+		IDecoder *pFailed = m_pSoundFile;
+		char mp3Name[128];
+		BuildMp3Filename(m_aFilename, mp3Name, sizeof(mp3Name));
+		if (strcasecmp(mp3Name, m_aFilename) != 0)
+		{
+			m_pSoundFile = CreateSoundDecoder(mp3Name, overrideSampleRate);
+			delete pFailed;
+			if (m_pSoundFile && m_pSoundFile->IsOpened())
+				strcpy(m_aFilename, mp3Name);
+		}
+	}
 
 	if ( m_pSoundFile && m_pSoundFile->IsOpened() )
 	{

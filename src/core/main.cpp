@@ -79,6 +79,10 @@
 #include "GitSHA1.h"
 #endif
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 GlobalScene Scene;
 
 uint8 work_buff[55000];
@@ -1741,10 +1745,18 @@ AppEventHandler(RsEvent event, void *param)
 
 		case rsCAMERASIZE:
 		{
-											
+#if __EMSCRIPTEN__
+			RwRect r = *(RwRect *)param;
+			int dpr = EM_ASM_INT({ return devicePixelRatio; });
+			if (dpr < 1)
+				dpr = 1;
+			r.w *= dpr;
+			r.h *= dpr;
+			CameraSize(Scene.camera, &r, SCREEN_VIEWWINDOW, DEFAULT_ASPECT_RATIO);
+#else
 			CameraSize(Scene.camera, (RwRect *)param,
 				SCREEN_VIEWWINDOW, DEFAULT_ASPECT_RATIO);
-			
+#endif
 			return rsEVENTPROCESSED;
 		}
 

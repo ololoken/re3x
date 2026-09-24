@@ -2,6 +2,9 @@
 #define WITHWINDOWS
 #define WITHDINPUT
 #include "common.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #ifndef PS2_MENU
 #include "crossplatform.h"
 #include "platform.h"
@@ -3283,6 +3286,12 @@ CMenuManager::SaveSettings()
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsShowHud, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsRadarMode, 1);
 		CFileMgr::Write(fileHandle, (char*)&m_PrefsShowLegends, 1);
+#ifdef __EMSCRIPTEN__
+		EM_ASM( { Module.callbacks?.onFileWrite?.({
+			path: UTF8ToString($0),
+			op: 'write'
+		}) }, "gta_vc.set");
+#endif
 	}
 	m_lastWorking3DAudioProvider = m_nPrefsAudio3DProviderIndex;
 

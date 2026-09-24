@@ -18,7 +18,7 @@ static RwBool               DefaultVideoMode = TRUE;
 RsGlobalType                RsGlobal;
 
 #ifdef _WIN32
-RwUInt32    
+RwUInt32
 #else
 double
 #endif
@@ -203,7 +203,7 @@ RsEventHandler(RsEvent event, void *param)
 {
 	RsEventStatus       result;
 	RsEventStatus       es;
-  
+
 	/*
 	 * Give the application an opportunity to override any events...
 	 */
@@ -308,7 +308,7 @@ RsRwInitialize(void *displayID)
 	/*
 	 * Start RenderWare...
 	 */
-	 
+
 	if (!RwEngineInit(psGetMemoryFunctions(), 0, rsRESOURCESDEFAULTARENASIZE))
 	{
 		return (FALSE);
@@ -339,7 +339,7 @@ RsRwInitialize(void *displayID)
 	{
 		return (FALSE);
 	}
-	
+
 	openParams.displayID = displayID;
 
 	if (!RwEngineOpen(&openParams))
@@ -347,14 +347,14 @@ RsRwInitialize(void *displayID)
 		RwEngineTerm();
 		return (FALSE);
 	}
-	
+
 	if (RsEventHandler(rsSELECTDEVICE, displayID) == rsEVENTERROR)
 	{
 		RwEngineClose();
 		RwEngineTerm();
 		return (FALSE);
 	}
-	
+
 	if (!RwEngineStart())
 	{
 		RwEngineClose();

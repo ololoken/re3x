@@ -1093,7 +1093,9 @@ void psPostRWinit(void)
 
 	if(!(vm.flags & rwVIDEOMODEEXCLUSIVE))
 		glfwSetWindowSize(PSGLOBAL(window), RsGlobal.maximumWidth, RsGlobal.maximumHeight);
-
+#ifdef __EMSCRIPTEN__
+	EM_ASM({ Object.assign(document.querySelector('canvas').style, { width: '100%', height: '100%' }) });
+#endif
 	// Make sure all keys are released
 	CPad::GetPad(0)->Clear(true);
 	CPad::GetPad(1)->Clear(true);
@@ -1121,7 +1123,7 @@ RwBool _psSetVideoMode(RwInt32 subSystem, RwInt32 videoMode)
 	useDefault = FALSE;
 	
 	RwRect r;
-	
+
 	r.x = 0;
 	r.y = 0;
 	r.w = RsGlobal.maximumWidth;
@@ -1431,7 +1433,7 @@ void resizeCB(GLFWwindow* window, int width, int height) {
 
 		RsEventHandler(rsCAMERASIZE, &r);
 	}
-//	glfwSetWindowPos(window, 0, 0);
+	glfwSetWindowPos(window, 0, 0);
 }
 
 void scrollCB(GLFWwindow* window, double xoffset, double yoffset) {
@@ -1864,8 +1866,15 @@ cursorCB(GLFWwindow* window, double xpos, double ypos) {
 	
 	int winw, winh;
 	glfwGetWindowSize(PSGLOBAL(window), &winw, &winh);
-	FrontEndMenuManager.m_nMouseTempPosX = xpos * (RsGlobal.maximumWidth / winw);
-	FrontEndMenuManager.m_nMouseTempPosY = ypos * (RsGlobal.maximumHeight / winh);
+#if __EMSCRIPTEN__
+	int dpr = EM_ASM_INT({ return devicePixelRatio; });
+	if (dpr < 1)
+		dpr = 1;
+#else
+	int dpr = 1;
+#endif
+	FrontEndMenuManager.m_nMouseTempPosX = xpos * (RsGlobal.maximumWidth / winw) * dpr;
+	FrontEndMenuManager.m_nMouseTempPosY = ypos * (RsGlobal.maximumHeight / winh) * dpr;
 }
 
 void
@@ -2238,7 +2247,7 @@ main(int argc, char *argv[])
 
 	ControlsManager.InitDefaultControlConfigMouse(MousePointerStateHelper.GetMouseSetUp());
 
-//	glfwSetWindowPos(PSGLOBAL(window), 0, 0);
+	glfwSetWindowPos(PSGLOBAL(window), 0, 0);
 
 	/* 
 	 * Parse command line parameters (except program name) one at 
@@ -2372,6 +2381,7 @@ main(int argc, char *argv[])
 			main_loop();
 #else
 #if __EMSCRIPTEN__
+		EM_ASM({ Module.callbacks?.onReady?.() });
 		emscripten_set_main_loop(main_loop, 0, true);
 #else
 		while( !RsGlobal.quit && !FrontEndMenuManager.m_bWantToRestart && !glfwWindowShouldClose(PSGLOBAL(window)))

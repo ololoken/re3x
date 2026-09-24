@@ -1,6 +1,9 @@
 #define WITHWINDOWS
 #include "common.h"
 #include "crossplatform.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 
 #include "FileMgr.h"
 #include "Font.h"
@@ -53,6 +56,12 @@ C_PcSave::SaveSlot(int32 slot)
 		if (GenericSave(file)) {
 			if (!!CFileMgr::CloseFile(file))
 				nErrorCode = SAVESTATUS_ERR_SAVE_CLOSE;
+#ifdef __EMSCRIPTEN__
+			EM_ASM( { Module.callbacks?.onFileWrite?.({
+				path: UTF8ToString($0),
+				op: 'write'
+			}) }, ValidSaveName);
+#endif
 			return 0;
 		}
 

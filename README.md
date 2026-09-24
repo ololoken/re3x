@@ -1,5 +1,9 @@
 <img src="https://github.com/GTAmodding/re3/blob/miami/res/images/logo_1024.png?raw=true" alt="reVC logo" width="200">
 
+```bash
+emcmake cmake ../ -DCMAKE_BUILD_TYPE=Release -DREVC_AUDIO=OAL -DREVC_WITH_OPUS=OFF -DREVC_WITH_LIBSNDFILE=OFF -DREVC_VENDORED_LIBRW=ON -DREVC_WITH_SANITIZERS=OFF -DREVC_WITH_ASAN=OFF -DLIBRW_PLATFORM=GL3 -DLIBRW_GL3_GFXLIB=GLFW
+```
+
 [![Build Status](https://img.shields.io/endpoint.svg?url=https%3A%2F%2Factions-badge.atrox.dev%2FGTAmodding%2Fre3%2Fbadge%3Fref%3Dmiami&style=flat)](https://actions-badge.atrox.dev/GTAmodding/re3/goto?ref=miami)
 <a href="https://discord.gg/RFNbjsUMGg"><img src="https://img.shields.io/badge/discord-join-7289DA.svg?logo=discord&longCache=true&style=flat" /></a>
 

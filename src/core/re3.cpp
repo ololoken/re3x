@@ -1,6 +1,9 @@
 #include <csignal>
 #define WITHWINDOWS
 #include "common.h"
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
 #if defined DETECT_JOYSTICK_MENU && defined XINPUT
 #include <xinput.h>
 #if !defined(PSAPI_VERSION) || (PSAPI_VERSION > 1)
@@ -477,6 +480,12 @@ void SaveINIControllerSettings()
 	StoreIni("Controller", "PadButtonsInited", ControlsManager.ms_padButtonsInited);
 
 	ini.write(cfg);
+#ifdef __EMSCRIPTEN__
+	EM_ASM( { Module.callbacks?.onFileWrite?.({
+		path: UTF8ToString($0),
+		op: 'write'
+	}) }, "reVC.ini");
+#endif
 }
 
 bool LoadINISettings()
@@ -680,6 +689,12 @@ void SaveINISettings()
 #endif
 
 	ini.write(cfg);
+#ifdef __EMSCRIPTEN__
+	EM_ASM( { Module.callbacks?.onFileWrite?.({
+		path: UTF8ToString($0),
+		op: 'write'
+	}) }, "reVC.ini");
+#endif
 }
 
 #endif
