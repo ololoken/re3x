@@ -20,6 +20,12 @@ header_directories(${PROJECT}_INCLUDES)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/extras/GitSHA1.cpp.in" "${CMAKE_CURRENT_BINARY_DIR}/extras/GitSHA1.cpp" @ONLY)
 list(APPEND ${PROJECT}_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/extras/GitSHA1.cpp")
 
+if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+    list(FILTER ${PROJECT}_SOURCES EXCLUDE REGEX "HttpAssetsNative\\.cpp$")
+else()
+    list(FILTER ${PROJECT}_SOURCES EXCLUDE REGEX "HttpAssets\\.cpp$")
+endif()
+
 add_executable(${EXECUTABLE} WIN32
     ${${PROJECT}_SOURCES}
 )
@@ -32,11 +38,12 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
         --use-port=contrib.glfw3 \
         --use-port=zlib \
         --use-port=mpg123 \
-        -g -gsource-map -fdebug-prefix-map=/mnt=/Users")
+        -O3 -flto")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${USE_FLAGS} -Wno-missing-template-arg-list-after-template-kw")
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${USE_FLAGS}")
 	set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${USE_FLAGS} \
 	-sASYNCIFY \
+	-sFETCH \
     -sDYNCALLS \
   -sALLOW_MEMORY_GROWTH -sINITIAL_MEMORY=512mb -sMEMORY_GROWTH_LINEAR_STEP=32mb \
   -sSTACK_SIZE=1024kb \
@@ -44,8 +51,7 @@ if (CMAKE_SYSTEM_NAME MATCHES "Emscripten")
   -sPTHREAD_POOL_SIZE=8 -sPTHREAD_POOL_SIZE_STRICT=0 \
   -sMODULARIZE -sEXPORT_ES6 \
   -sFULL_ES2 -sMIN_WEBGL_VERSION=2 \
-  -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency \
-  -sEXPORT_ALL \
+  -sEXPORTED_RUNTIME_METHODS=callMain,addRunDependency,removeRunDependency,ENV,FS,PATH \
   -sEXIT_RUNTIME \
   -lidbfs.js -sCASE_INSENSITIVE_FS")
 endif ()

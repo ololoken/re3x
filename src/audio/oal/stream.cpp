@@ -1,4 +1,5 @@
 #include "common.h"
+#include "HttpAssets.h"
 
 #ifdef AUDIO_OAL
 
@@ -22,9 +23,6 @@
 
 #include <queue>
 #include <utility>
-#ifdef __EMSCRIPTEN__
-#include <emscripten.h>
-#endif
 
 #ifdef MULTITHREADED_AUDIO
 #include <iostream>
@@ -1233,14 +1231,39 @@ CStream::CStream(ALuint *sources, ALuint (&buffers)[NUM_STREAMBUFFERS]) :
 	m_nVolume(0),
 	m_nPan(0),
 	m_nPosBeforeReset(0),
-	m_nLoopCount(1)
+	m_nLoopCount(1),
+	m_bWaitingForFile(false)
 	
 {
+}
+
+static bool
+EndsWithMp3(const char *filename)
+{
+	size_t len;
+	if (!filename)
+		return false;
+	len = strlen(filename);
+	return len >= 4 && !strcasecmp(filename + len - 4, ".mp3");
+}
+
+// True when the decoder may open the path. A missing remote mp3 is fetched
+// and reported not ready, so mpg123 is not asked to open a file that is
+// still downloading.
+static bool
+StreamFileReady(const char *filename)
+{
+	if (!HttpAssets::IsActive() || !EndsWithMp3(filename))
+		return true;
+	return HttpAssets::Ensure(filename);
 }
 
 static IDecoder *
 CreateSoundDecoder(const char *filename, uint32 overrideSampleRate)
 {
+	if (!StreamFileReady(filename))
+		return nil;
+
 	if (!strcasecmp(&filename[strlen(filename) - strlen(".wav")], ".wav"))
 #ifdef AUDIO_OAL_USE_SNDFILE
 		return new CSndFile(filename);
@@ -1311,6 +1334,12 @@ bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 	m_nPan = 0;
 	m_nPosBeforeReset = 0;
 	m_nLoopCount = 1;
+	m_bWaitingForFile = false;
+
+	if (!StreamFileReady(filename)) {
+		m_bWaitingForFile = true;
+		return false;
+	}
 
 // Be case-insensitive on linux (from https://github.com/OneSadCookie/fcaseopen/)
 #if !defined(_WIN32)
@@ -1373,6 +1402,7 @@ CStream::~CStream()
 
 void CStream::Close()
 {
+	m_bWaitingForFile = false;
 	if(!IsOpened()) return;
 
 #ifdef MULTITHREADED_AUDIO
@@ -1419,6 +1449,11 @@ bool CStream::IsOpened()
 #else
 	return m_pSoundFile && m_pSoundFile->IsOpened();
 #endif
+}
+
+bool CStream::IsWaitingForFile()
+{
+	return m_bWaitingForFile;
 }
 
 bool CStream::IsPlaying()
@@ -1545,9 +1580,6 @@ uint32 CStream::GetPosMS()
 
 	ALint offset;
 	//alGetSourcei(m_alSource, AL_SAMPLE_OFFSET, &offset);
-#ifdef __EMSCRIPTEN__
-	emscripten_sleep(1000);
-#endif
 	alGetSourcei(m_pAlSources[0], AL_BYTE_OFFSET, &offset);
 
 	//std::lock_guard<std::mutex> lock(m_mutex);

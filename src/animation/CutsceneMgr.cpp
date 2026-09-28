@@ -22,6 +22,7 @@
 #include "ColStore.h"
 #include "Radar.h"
 #include "Pools.h"
+#include "HttpAssets.h"
 
 const struct {
 	const char *szTrackName;
@@ -200,16 +201,34 @@ CCutsceneMgr::LoadCutsceneData(const char *szCutsceneName)
 
 	strcpy(ms_cutsceneName, szCutsceneName);
 
-	RwStream *stream;
-	stream = RwStreamOpen(rwSTREAMFILENAME, rwSTREAMREAD, "ANIM\\CUTS.IMG");
-	assert(stream);
+	// cuts.img is used when it is on disk. The web build hosts each entry as
+	// anim/cuts/<name> and does not download the packed archive.
+	auto storedName = [&](const char *wanted) -> const char * {
+		for (int i = 0; i < ms_pCutsceneDir->numEntries; i++) {
+			if (!CGeneral::faststricmp(ms_pCutsceneDir->entries[i].name, wanted))
+				return ms_pCutsceneDir->entries[i].name;
+		}
+		return wanted;
+	};
 
-	// Load animations
 	sprintf(gString, "%s.IFP", szCutsceneName);
+	bool packedImg = false;
+	RwStream *stream = RwStreamOpen(rwSTREAMFILENAME, rwSTREAMREAD, "ANIM\\CUTS.IMG");
+	if (stream)
+		packedImg = true;
+	else if (HttpAssets::IsActive()) {
+		char rel[96];
+		snprintf(rel, sizeof(rel), "anim/cuts/%s", storedName(gString));
+		if (HttpAssets::EnsureBlocking(rel))
+			stream = RwStreamOpen(rwSTREAMFILENAME, rwSTREAMREAD, rel);
+	}
+
 	if (ms_pCutsceneDir->FindItem(gString, offset, size)) {
+		assert(stream);
 		CStreaming::MakeSpaceFor(size << 11);
 		CStreaming::ImGonnaUseStreamingMemory();
-		RwStreamSkip(stream,  offset << 11);
+		if (packedImg)
+			RwStreamSkip(stream, offset << 11);
 		CAnimManager::LoadAnimFile(stream, true, uncompressedAnims);
 		ms_cutsceneAssociations.CreateAssociations(szCutsceneName);
 		CStreaming::IHaveUsedStreamingMemory();
@@ -217,22 +236,34 @@ CCutsceneMgr::LoadCutsceneData(const char *szCutsceneName)
 	} else {
 		ms_animLoaded = false;
 	}
-	RwStreamClose(stream, nil);
+	if (stream)
+		RwStreamClose(stream, nil);
 
-	// Load camera data
-	file = CFileMgr::OpenFile("ANIM\\CUTS.IMG", "rb");
 	sprintf(gString, "%s.DAT", szCutsceneName);
 	if (ms_pCutsceneDir->FindItem(gString, offset, size)) {
-		CStreaming::ImGonnaUseStreamingMemory();
-		CFileMgr::Seek(file, offset << 11, SEEK_SET);
-		TheCamera.LoadPathSplines(file);
-		CStreaming::IHaveUsedStreamingMemory();
-		bCamLoaded = true;
+		file = 0;
+		if (packedImg) {
+			file = CFileMgr::OpenFile("ANIM\\CUTS.IMG", "rb");
+			if (file)
+				CFileMgr::Seek(file, offset << 11, SEEK_SET);
+		} else if (HttpAssets::IsActive()) {
+			char rel[96];
+			snprintf(rel, sizeof(rel), "anim/cuts/%s", storedName(gString));
+			if (HttpAssets::EnsureBlocking(rel))
+				file = CFileMgr::OpenFile(rel, "rb");
+		}
+		if (file) {
+			CStreaming::ImGonnaUseStreamingMemory();
+			TheCamera.LoadPathSplines(file);
+			CStreaming::IHaveUsedStreamingMemory();
+			CFileMgr::CloseFile(file);
+			bCamLoaded = true;
+		} else {
+			bCamLoaded = false;
+		}
 	} else {
 		bCamLoaded = false;
 	}
-
-	CFileMgr::CloseFile(file);
 
 	if (CGeneral::faststricmp(ms_cutsceneName, "finale")) {
 		DMAudio.ChangeMusicMode(MUSICMODE_CUTSCENE);

@@ -939,8 +939,19 @@ void CPad::UpdateMouse()
 		xpos = (double)sdl_x;
 		ypos = (double)sdl_y;
 #endif
-		if (xpos == 0.f)
+		if (xpos == 0.f) {
+#ifdef __EMSCRIPTEN__
+			// GLFW reports 0 until the first move. A click on the canvas must
+			// still count; skipping here drops it when no mouseenter arrived.
+			PCTempMouseControllerState.Clear();
+			PCTempMouseControllerState.LMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_LEFT);
+			PCTempMouseControllerState.RMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_RIGHT);
+			PCTempMouseControllerState.MMB = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_MIDDLE);
+			OldMouseControllerState = NewMouseControllerState;
+			NewMouseControllerState = PCTempMouseControllerState;
+#endif
 			return;
+		}
 
 		int32 signX = 1;
 		int32 signy = 1;

@@ -306,10 +306,13 @@ void _rwD3D8TexDictionaryEnableRasterFormatConversion(bool enable) { }
 RwBool rwNativeTextureHackRead(RwStream *stream, RwTexture **tex, RwInt32 size)
 {
 	*tex = Texture::streamReadNative(stream);
+	if (*tex == nil)
+		return false;
 #ifdef LIBRW
-	(*tex)->raster = rw::Raster::convertTexToCurrentPlatform((*tex)->raster);
+	if((*tex)->raster)
+		(*tex)->raster = rw::Raster::convertTexToCurrentPlatform((*tex)->raster);
 #endif
-	return *tex != nil;
+	return true;
 }
 
 

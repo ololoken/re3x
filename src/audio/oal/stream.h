@@ -140,6 +140,7 @@ public:
 	uint8    m_nPan;
 	uint32   m_nPosBeforeReset;
 	int32   m_nLoopCount;
+	bool    m_bWaitingForFile;
 	
 	IDecoder *m_pSoundFile;
 
@@ -171,6 +172,7 @@ public:
 	void   Close();
 	
 	bool   IsOpened();
+	bool   IsWaitingForFile();
 	bool   IsPlaying();
 	void   SetPause (bool bPause);
 	void   SetVolume(uint32 nVol);

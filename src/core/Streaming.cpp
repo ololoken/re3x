@@ -8,6 +8,7 @@
 #include "Renderer.h"
 #include "ModelInfo.h"
 #include "TxdStore.h"
+#include "HttpAssets.h"
 #include "ModelIndices.h"
 #include "Pools.h"
 #include "Wanted.h"
@@ -27,6 +28,7 @@
 #include "CutsceneMgr.h"
 #include "CdStream.h"
 #include "Streaming.h"
+#include "crossplatform.h"
 #include "Replay.h"
 #include "main.h"
 #include "ColStore.h"
@@ -400,6 +402,14 @@ CStreaming::LoadCdDirectory(void)
 	ms_imageSize /= CDSTREAM_SECTOR_SIZE;
 }
 
+static void
+RegisterImgFile(int image, uint32 sector, uint32 sectors, const char *name)
+{
+	char rel[64];
+	snprintf(rel, sizeof(rel), "models/gta3/%s", name);
+	HttpAssets::RegisterImageFile(image, sector, sectors, rel);
+}
+
 void
 CStreaming::LoadCdDirectory(const char *dirname, int n)
 {
@@ -414,12 +424,17 @@ CStreaming::LoadCdDirectory(const char *dirname, int n)
 
 	imgSelector = n<<24;
 	assert(sizeof(direntry) == 32);
+	HttpAssets::ClearImage(n);
 	while(CFileMgr::Read(fd, (char*)&direntry, sizeof(direntry))){
 		bool bAddToStreaming = false;
+		uint32 sector = direntry.offset;
 
 		if(direntry.size > (uint32)ms_streamingBufferSize)
 			ms_streamingBufferSize = direntry.size;
 		direntry.name[23] = '\0';
+		char entryName[24];
+		strncpy(entryName, direntry.name, sizeof(entryName));
+		entryName[sizeof(entryName) - 1] = '\0';
 		dot = strchr(direntry.name, '.');
 		if(dot == nil || dot-direntry.name > 20){
 			debug("%s is too long\n", direntry.name);
@@ -439,6 +454,7 @@ CStreaming::LoadCdDirectory(const char *dirname, int n)
 #else
 				ms_pExtraObjectsDir->AddItem(direntry);
 #endif
+				RegisterImgFile(n, sector, direntry.size, entryName);
 				lastID = -1;
 			}
 		}else if(strncasecmp(dot+1, "TXD", 3) == 0){
@@ -467,6 +483,7 @@ CStreaming::LoadCdDirectory(const char *dirname, int n)
 				debug("%s.%s appears more than once in %s\n", direntry.name, dot+1, dirname);
 				lastID = -1;
 			}else{
+				RegisterImgFile(n, sector, direntry.size, entryName);
 				direntry.offset |= imgSelector;
 				ms_aInfoForModel[modelId].SetCdPosnAndSize(direntry.offset, direntry.size);
 				if(lastID != -1)
@@ -2446,6 +2463,14 @@ CStreaming::LoadAllRequestedModels(bool priority)
 void
 CStreaming::LoadAllRequestedModels(bool priority)
 {
+#ifdef __EMSCRIPTEN__
+	// The per-frame streamer finishes these reads. Waiting here holds the
+	// frame inside CdStreamSync until every download completes.
+	if (HttpAssets::IsActive() && gGameState == GS_PLAYING_GAME) {
+		LoadRequestedModels();
+		return;
+	}
+#endif
 	static bool bInsideLoadAll = false;
 	int imgOffset, streamId, status;
 	int i;

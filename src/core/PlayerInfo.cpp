@@ -657,6 +657,10 @@ FindPlayerCoors(void)
 		return TheCamera.GetPosition();
 #endif
 	CPlayerPed *ped = FindPlayerPed();
+#ifdef FIX_BUGS
+	if (!ped)
+		return TheCamera.GetPosition();
+#endif
 	if(ped->InVehicle())
 		return ped->m_pMyVehicle->GetPosition();
 	else

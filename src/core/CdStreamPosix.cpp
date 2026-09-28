@@ -21,9 +21,11 @@
 
 #ifdef __EMSCRIPTEN__
 #include <emscripten.h>
+extern void RsPumpFrameDuringAssetLoad();
 #endif
 
 #include "CdStream.h"
+#include "HttpAssets.h"
 #include "rwcore.h"
 #include "MemoryMgr.h"
 
@@ -220,12 +222,21 @@ void
 CdStreamInit(int32 numChannels)
 {
 	struct statvfs fsInfo;
+	memset(&fsInfo, 0, sizeof(fsInfo));
+	fsInfo.f_bsize = CDSTREAM_SECTOR_SIZE;
 
 	if((statvfs("models/gta3.img", &fsInfo)) < 0)
 	{
-		CDTRACE("can't get filesystem info");
-		ASSERT(0);
-		return;
+		// This runs before psInitialize, so bring the asset loader up here.
+		// When it is active, models/gta3.img is absent on purpose and sector
+		// reads are satisfied from models/gta3/<file>.
+		HttpAssets::Init();
+		if (!HttpAssets::IsActive()) {
+			CDTRACE("can't get filesystem info");
+			ASSERT(0);
+			return;
+		}
+		fsInfo.f_bsize = CDSTREAM_SECTOR_SIZE;
 	}
 #ifdef __linux__
 	_gdwCdStreamFlags = O_RDONLY | O_NOATIME;
@@ -263,6 +274,9 @@ uint32
 GetGTA3ImgSize(void)
 {
 	ASSERT( gImgFiles[0] > 0 );
+	if (HttpAssets::IsVirtualFd(gImgFiles[0] - 1))
+		return 0xFFFFFFU * CDSTREAM_SECTOR_SIZE;
+
 	struct stat statbuf;
 
 	char path[PATH_MAX];
@@ -423,6 +437,7 @@ CdStreamSync(int32 channel)
 #ifndef __EMSCRIPTEN__
 			sem_wait(pChannel->pDoneSemaphore);
 #else
+			RsPumpFrameDuringAssetLoad();
 			emscripten_sleep(0);
 #endif
 		}
@@ -471,6 +486,21 @@ RemoveFirstInQueue(Queue *queue)
 	queue->head = (queue->head + 1) % queue->size;
 }
 
+static void
+OnHttpRead(bool ok, void *user)
+{
+	CdReadInfo *pChannel = (CdReadInfo *)user;
+	int32 channel = GetFirstInQueue(&gChannelRequestQ);
+	if (channel != -1 && &gpReadInfo[channel] == pChannel)
+		RemoveFirstInQueue(&gChannelRequestQ);
+
+	pChannel->nStatus = ok ? STREAM_NONE : STREAM_ERROR;
+	pChannel->nSectorsToRead = 0;
+	pChannel->bReading = false;
+	if (pChannel->bLocked)
+		pChannel->bLocked = false;
+}
+
 void CdStreamAsyncThread()
 {
 	int32 channel = GetFirstInQueue(&gChannelRequestQ);
@@ -480,6 +510,18 @@ void CdStreamAsyncThread()
 	ASSERT( pChannel != nil );
 
 	if(pChannel->nSectorsToRead == 0) return;
+
+	// Same role as the background CdStreamThread: start the read and return.
+	// The fetch completes on the browser event loop; CdStreamSync yields with
+	// emscripten_sleep until nSectorsToRead is cleared.
+	if (HttpAssets::IsVirtualFd(pChannel->hFile)) {
+		if (pChannel->bReading)
+			return;
+		pChannel->bReading = true;
+		HttpAssets::StartImageRead(pChannel->hFile, pChannel->nSectorOffset, pChannel->nSectorsToRead,
+		                           pChannel->pBuffer, OnHttpRead, pChannel);
+		return;
+	}
 
 	if ( pChannel->nStatus == STREAM_NONE )
 	{
@@ -612,6 +654,11 @@ CdStreamAddImage(char const *path)
 		}
 	}
 
+	if ( gImgFiles[gNumImages] == -1 && HttpAssets::IsActive() ) {
+		printf("cdvd_stream: %s is not local, reading unpacked files over HTTP\n", path);
+		gImgFiles[gNumImages] = HttpAssets::VirtualFd(gNumImages);
+	}
+
 	if ( gImgFiles[gNumImages] == -1 ) {
 		assert(false);
 		return false;
@@ -649,7 +696,9 @@ CdStreamRemoveImages(void)
 
 	for ( int32 i = 0; i < gNumImages; i++ )
 	{
-		close(gImgFiles[i] - 1);
+		int fd = gImgFiles[i] - 1;
+		if (!HttpAssets::IsVirtualFd(fd))
+			close(fd);
 		free(gImgNames[i]);
 		gImgFiles[i] = 0;
 	}

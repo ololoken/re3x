@@ -42,6 +42,10 @@
 #include <condition_variable>
 #endif
 #include "oal/stream.h"
+#include "HttpAssets.h"
+
+#include <string>
+#include <vector>
 
 #include "AudioManager.h"
 #include "MusicManager.h"
@@ -129,6 +133,35 @@ uint32 nNumMP3s;
 tMP3Entry* _pMP3List;
 char _mp3DirectoryPath[MAX_PATH]; 
 CStream    *aStream[MAX_STREAMS];
+
+// A streamed open that lost the race with the download. Retried from Service
+// until the file is local, or until the stream is stopped.
+struct PendingStream
+{
+	bool active;
+	bool play;
+	uint32 file;
+	uint32 pos;
+};
+static PendingStream g_pendingStream[MAX_STREAMS];
+
+static void
+ClearPendingStream(uint8 nStream)
+{
+	if (nStream < MAX_STREAMS)
+		g_pendingStream[nStream].active = false;
+}
+
+static void
+RememberPendingStream(uint8 nStream, uint32 nFile, uint32 nPos, bool play)
+{
+	if (nStream >= MAX_STREAMS)
+		return;
+	g_pendingStream[nStream].active = true;
+	g_pendingStream[nStream].play = play;
+	g_pendingStream[nStream].file = nFile;
+	g_pendingStream[nStream].pos = nPos;
+}
 uint8      nStreamPan   [MAX_STREAMS];
 uint8      nStreamVolume[MAX_STREAMS];
 bool8      nStreamLoopedFlag[MAX_STREAMS];
@@ -921,7 +954,9 @@ cSampleManager::Initialise(void)
 		debug("Cannot load audio cache\n");
 #endif
 
-		for ( int32 i = 0; i < TOTAL_STREAMED_SOUNDS; i++ )
+		// Opening every track here also downloads it. Mission and radio
+		// files are fetched when playback actually starts.
+		if ( !HttpAssets::IsActive() ) for ( int32 i = 0; i < TOTAL_STREAMED_SOUNDS; i++ )
 		{	
 			if ( aStream[0] && (
 #ifdef PS2_AUDIO_PATHS
@@ -1212,6 +1247,76 @@ cSampleManager::SetMonoMode(bool8 nMode)
 	m_nMonoMode = nMode;
 }
 
+static const char *
+SfxSampleName(uint32 index)
+{
+	static const char *const names[] = {
+#include "SfxSampleNames.inc"
+	};
+	static_assert(ARRAY_SIZE(names) == TOTAL_AUDIO_SAMPLES, "sfx sample name table is out of date");
+	if (index >= TOTAL_AUDIO_SAMPLES)
+		return nil;
+	return names[index];
+}
+
+static bool8
+ReadUnpackedSfx(uint32 index, void *dst, uint32 size)
+{
+	const char *name = SfxSampleName(index);
+	if (name == nil || size == 0)
+		return FALSE;
+	char rel[128];
+	snprintf(rel, sizeof(rel), "audio/sfx/%s.raw", name);
+	if (!HttpAssets::Ensure(rel))
+		return FALSE;
+	return HttpAssets::Read(rel, dst, size) == size;
+}
+
+static bool8
+LoadUnpackedSampleBank(uint8 nBank, tSample *samples)
+{
+	uint8 *dst = (uint8 *)nSampleBankMemoryStartAddress[nBank];
+	uint32 base = nSampleBankDiscStartOffset[nBank];
+	uint32 end = base + nSampleBankSize[nBank];
+	std::vector<std::string> paths;
+	std::vector<uint32> localOff;
+	std::vector<uint32> sizes;
+
+	for (uint32 i = 0; i < TOTAL_AUDIO_SAMPLES; i++) {
+		if (samples[i].nSize == 0 || samples[i].nOffset < base || samples[i].nOffset >= end)
+			continue;
+		const char *name = SfxSampleName(i);
+		if (name == nil)
+			return FALSE;
+		char rel[128];
+		snprintf(rel, sizeof(rel), "audio/sfx/%s.raw", name);
+		paths.emplace_back(rel);
+		localOff.push_back(samples[i].nOffset - base);
+		sizes.push_back(samples[i].nSize);
+	}
+
+	std::vector<const char *> ptrs;
+	ptrs.reserve(paths.size());
+	for (auto &path : paths)
+		ptrs.push_back(path.c_str());
+	// Keep the in-flight set small; the browser queues the rest anyway.
+	for (size_t start = 0; start < ptrs.size(); start += 32) {
+		uint32 n = (uint32)Min(ptrs.size() - start, (size_t)32);
+		if (!HttpAssets::EnsureAll(ptrs.data() + start, n))
+			return FALSE;
+	}
+
+	for (size_t i = 0; i < paths.size(); i++) {
+		if (localOff[i] + sizes[i] > nSampleBankSize[nBank])
+			return FALSE;
+		if (HttpAssets::Read(paths[i].c_str(), dst + localOff[i], sizes[i]) != sizes[i])
+			return FALSE;
+	}
+
+	gBankLoaded[nBank] = LOADING_STATUS_LOADED;
+	return TRUE;
+}
+
 bool8
 cSampleManager::LoadSampleBank(uint8 nBank)
 {
@@ -1242,6 +1347,9 @@ cSampleManager::LoadSampleBank(uint8 nBank)
 		samplesSize -= size;
 	}
 #else
+	if ( fpSampleDataHandle == nil )
+		return LoadUnpackedSampleBank(nBank, m_aSamples);
+
 	if ( fseek(fpSampleDataHandle, nSampleBankDiscStartOffset[nBank], SEEK_SET) != 0 )
 		return FALSE;
 	
@@ -1283,7 +1391,14 @@ cSampleManager::LoadMissionAudio(uint8 nSlot, uint32 nSample)
 {
 	ASSERT(nSlot == MISSION_AUDIO_PLAYER_COMMENT); // only MISSION_AUDIO_PLAYER_COMMENT is supported on PC
 	ASSERT(nSample < TOTAL_AUDIO_SAMPLES);
-	
+
+	if (fpSampleDataHandle == nil) {
+		if (!ReadUnpackedSfx(nSample, gPlayerTalkData, m_aSamples[nSample].nSize))
+			return FALSE;
+		gPlayerTalkSfx = nSample;
+		return TRUE;
+	}
+
 	if (fseek(fpSampleDataHandle, m_aSamples[nSample].nOffset, SEEK_SET) != 0)
 		return FALSE;
 
@@ -1373,6 +1488,15 @@ cSampleManager::LoadPedComment(uint32 nComment)
 		samplesSize -= size;
 	}
 #else
+	if ( fpSampleDataHandle == nil ) {
+		if (!ReadUnpackedSfx(nComment, (void *)(nSampleBankMemoryStartAddress[SFX_BANK_PED_COMMENTS] + PED_BLOCKSIZE * nCurrentPedSlot), m_aSamples[nComment].nSize))
+			return FALSE;
+		nPedSlotSfx[nCurrentPedSlot] = nComment;
+		if ( ++nCurrentPedSlot >= MAX_PEDSFX )
+			nCurrentPedSlot = 0;
+		return TRUE;
+	}
+
 	if ( fseek(fpSampleDataHandle, m_aSamples[nComment].nOffset, SEEK_SET) != 0 )
 		return FALSE;
 	
@@ -1708,6 +1832,7 @@ cSampleManager::PreloadStreamedFile(uint32 nFile, uint8 nStream)
 	{
 		CStream *stream = aStream[nStream];
 
+		bool playAfter = g_pendingStream[nStream].active && g_pendingStream[nStream].play;
 		stream->Close();
 #ifdef PS2_AUDIO_PATHS
 		if(!stream->Open(PS2StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000))
@@ -1715,7 +1840,16 @@ cSampleManager::PreloadStreamedFile(uint32 nFile, uint8 nStream)
 			stream->Open(StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000);
 		if ( !stream->Setup() )
 		{
+			bool waiting = stream->IsWaitingForFile();
 			stream->Close();
+			if (waiting)
+				RememberPendingStream(nStream, nFile, 0, playAfter);
+			else
+				ClearPendingStream(nStream);
+		} else {
+			ClearPendingStream(nStream);
+			if (playAfter)
+				stream->Start();
 		}
 	}
 }
@@ -1743,6 +1877,9 @@ cSampleManager::StartPreloadedStreamedFile(uint8 nStream)
 	if ( stream->IsOpened() )
 	{
 		stream->Start();
+		ClearPendingStream(nStream);
+	} else if (g_pendingStream[nStream].active) {
+		g_pendingStream[nStream].play = true;
 	}
 }
 
@@ -1755,6 +1892,21 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 	
 	if ( nFile >= TOTAL_STREAMED_SOUNDS )
 		return FALSE;
+
+	bool waited = false;
+	auto noteOpen = [&](CStream *stream) -> bool {
+		if (stream->Setup()) {
+			ClearPendingStream(nStream);
+			return true;
+		}
+		waited = stream->IsWaitingForFile();
+		stream->Close();
+		if (waited)
+			RememberPendingStream(nStream, nFile, position, true);
+		else
+			ClearPendingStream(nStream);
+		return false;
+	};
 
 	aStream[nStream]->Close();
 
@@ -1778,7 +1930,7 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 					if(!stream->Open(PS2StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000))
 #endif
 						stream->Open(StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000);
-					if ( stream->Setup() ) {
+					if ( noteOpen(stream) ) {
 						stream->SetLoopCount(nStreamLoopedFlag[nStream] ? 0 : 1);
 						nStreamLoopedFlag[nStream] = TRUE;
 						if (position != 0)
@@ -1787,8 +1939,6 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 						stream->Start();
 
 						return TRUE;
-					} else {
-						stream->Close();
 					}
 					return FALSE;
 
@@ -1803,7 +1953,7 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 						aStream[nStream]->Open(filename);
 					}
 
-					if (aStream[nStream]->Setup()) {
+					if (noteOpen(aStream[nStream])) {
 						if (position != 0)
 							aStream[nStream]->SetPosMS(position);
 
@@ -1811,9 +1961,9 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 
 						_bIsMp3Active = TRUE;
 						return TRUE;
-					} else {
-						aStream[nStream]->Close();
 					}
+					if (waited)
+						return FALSE;
 					// fall through, start playing from another song
 				}
 			} else {
@@ -1836,7 +1986,7 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 #endif
 							stream->Open(StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000);
 
-						if (stream->Setup()) {
+						if (noteOpen(stream)) {
 							stream->SetLoopCount(nStreamLoopedFlag[nStream] ? 0 : 1);
 							nStreamLoopedFlag[nStream] = TRUE;
 							if (position != 0)
@@ -1845,8 +1995,6 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 							stream->Start();
 
 							return TRUE;
-						} else {
-							stream->Close();
 						}
 						return FALSE;
 					}
@@ -1860,15 +2008,15 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 					aStream[nStream]->Open(filename, IsThisTrackAt16KHz(nFile) ? 16000 : 32000);
 				}
 
-				if (aStream[nStream]->Setup()) {
+				if (noteOpen(aStream[nStream])) {
 					aStream[nStream]->Start();
 #ifdef FIX_BUGS
 					_bIsMp3Active = TRUE;
 #endif
 					return TRUE;
-				} else {
-					aStream[nStream]->Close();
 				}
+				if (waited)
+					return FALSE;
 
 			}
 			_bIsMp3Active = FALSE;
@@ -1886,7 +2034,7 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 #endif
 		stream->Open(StreamedNameTable[nFile], IsThisTrackAt16KHz(nFile) ? 16000 : 32000);
 	
-	if ( stream->Setup() ) {
+	if ( noteOpen(stream) ) {
 		stream->SetLoopCount(nStreamLoopedFlag[nStream] ? 0 : 1);
 		nStreamLoopedFlag[nStream] = TRUE;
 		if (position != 0)
@@ -1895,8 +2043,6 @@ cSampleManager::StartStreamedFile(uint32 nFile, uint32 nPos, uint8 nStream)
 		stream->Start();
 		
 		return TRUE;
-	} else {
-		stream->Close();
 	}
 	return FALSE;
 }
@@ -1909,6 +2055,7 @@ cSampleManager::StopStreamedFile(uint8 nStream)
 	CStream *stream = aStream[nStream];
 	
 	stream->Close();
+	ClearPendingStream(nStream);
 
 	if ( nStream == 0 )
 		_bIsMp3Active = FALSE;
@@ -2009,7 +2156,18 @@ cSampleManager::Service(void)
 	for ( int32 i = 0; i < MAX_STREAMS; i++ )
 	{
 		CStream *stream = aStream[i];
-		
+		PendingStream &pend = g_pendingStream[i];
+
+		if (pend.active && stream && !stream->IsOpened()) {
+			if (pend.play)
+				StartStreamedFile(pend.file, pend.pos, i);
+			else
+				PreloadStreamedFile(pend.file, i);
+		} else if (pend.active && pend.play && stream && stream->IsOpened() && !stream->IsPlaying()) {
+			stream->Start();
+			pend.active = false;
+		}
+
 		if ( stream->IsOpened() )
 			stream->Update();
 	}
@@ -2026,12 +2184,15 @@ cSampleManager::InitialiseSampleBanks(void)
 {
 	int32 nBank = SFX_BANK_0;
 	
+	int32 _nSampleDataEndOffset = 0;
+
 	fpSampleDescHandle = fcaseopen(SampleBankDescFilename, "rb");
 	if ( fpSampleDescHandle == NULL )
 		return FALSE;
 #ifndef OPUS_SFX
 	fpSampleDataHandle = fcaseopen(SampleBankDataFilename, "rb");
-	if ( fpSampleDataHandle == NULL )
+	// sfx.raw is not downloaded. Individual samples live in audio/sfx/.
+	if ( fpSampleDataHandle == NULL && !HttpAssets::IsActive() )
 	{
 		fclose(fpSampleDescHandle);
 		fpSampleDescHandle = NULL;
@@ -2039,16 +2200,22 @@ cSampleManager::InitialiseSampleBanks(void)
 		return FALSE;
 	}
 	
-	fseek(fpSampleDataHandle, 0, SEEK_END);
-	int32 _nSampleDataEndOffset = ftell(fpSampleDataHandle);
-	rewind(fpSampleDataHandle);
+	if ( fpSampleDataHandle != NULL )
+	{
+		fseek(fpSampleDataHandle, 0, SEEK_END);
+		_nSampleDataEndOffset = ftell(fpSampleDataHandle);
+		rewind(fpSampleDataHandle);
+	}
 #else
 	int e;
 	fpSampleDataHandle = op_open_file(SampleBankDataFilename, &e);
 #endif
 	fread(m_aSamples, sizeof(tSample), TOTAL_AUDIO_SAMPLES, fpSampleDescHandle);
 #ifdef OPUS_SFX
-	int32 _nSampleDataEndOffset = m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nOffset + m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nSize;
+	_nSampleDataEndOffset = m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nOffset + m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nSize;
+#else
+	if ( fpSampleDataHandle == NULL )
+		_nSampleDataEndOffset = m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nOffset + m_aSamples[TOTAL_AUDIO_SAMPLES - 1].nSize;
 #endif
 	fclose(fpSampleDescHandle);
 	fpSampleDescHandle = NULL;

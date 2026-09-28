@@ -1483,6 +1483,20 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 					static uint32 lastBlendChange = 0;
 					if (m_nOptionHighlightTransitionBlend <= 255) {
 						static uint32 blendChangeCounter = 0;
+#ifdef __EMSCRIPTEN__
+						uint32 now = CTimer::GetTimeInMillisecondsPauseMode();
+						int steps = (int)((now - lastBlendChange) / 20);
+						if (steps < 1 && blendChangeCounter > 20)
+							steps = 1;
+						if (steps > 3)
+							steps = 3;
+						if (steps > 0) {
+							m_nOptionHighlightTransitionBlend += 50 * steps;
+							lastBlendChange = now;
+							blendChangeCounter = 0;
+						}
+						blendChangeCounter += CTimer::GetLogicalFramesPassed();
+#else
 						if (CTimer::GetTimeInMillisecondsPauseMode() - lastBlendChange > 20
 							|| blendChangeCounter > 20
 							) {
@@ -1494,6 +1508,7 @@ CMenuManager::DrawStandardMenus(bool activeScreen)
 						blendChangeCounter += CTimer::GetLogicalFramesPassed();
 #else
 						++blendChangeCounter;
+#endif
 #endif
 					}
 				}
@@ -2312,10 +2327,6 @@ CMenuManager::DrawBackground(bool transitionCall)
 
 	SetFrontEndRenderStates();
 
-	if (m_firstStartCounter < 255) {
-		CSprite2d::DrawRect(CRect(0.0f, 0.0f, SCREEN_WIDTH, SCREEN_HEIGHT), CRGBA(0, 0, 0, 255));
-	}
-
 	if (m_nMenuFadeAlpha != 0) {
 
 		if (m_nMenuFadeAlpha < 255) {
@@ -2448,7 +2459,25 @@ CMenuManager::DrawBackground(bool transitionCall)
 	static uint32 LastFade = 0;
 
 	if (m_nMenuFadeAlpha < 255) {
-		static uint8 forceFadeInCounter = 0;	
+		static uint8 forceFadeInCounter = 0;
+#ifdef __EMSCRIPTEN__
+		// One notch per frame makes the open crawl whenever a frame is slow.
+		// Apply every elapsed 30ms slot, but only a few, so a hitch cannot skip the fade.
+		uint32 now = CTimer::GetTimeInMillisecondsPauseMode();
+		int steps = (int)((now - LastFade) / 30);
+		if (steps < 1 && forceFadeInCounter > 30)
+			steps = 1;
+		if (steps > 3)
+			steps = 3;
+		if (steps > 0) {
+			m_nMenuFadeAlpha = Min(255, m_nMenuFadeAlpha + 20 * steps);
+			if (m_firstStartCounter < 255)
+				m_firstStartCounter = Min(255, m_firstStartCounter + 20 * steps);
+			LastFade = now;
+			forceFadeInCounter = 0;
+		}
+		forceFadeInCounter += CTimer::GetLogicalFramesPassed();
+#else
 		if (CTimer::GetTimeInMillisecondsPauseMode() - LastFade > 30
 			|| forceFadeInCounter > 30
 			) {
@@ -2465,6 +2494,7 @@ CMenuManager::DrawBackground(bool transitionCall)
 		forceFadeInCounter += CTimer::GetLogicalFramesPassed();
 #else
 		forceFadeInCounter++;
+#endif
 #endif
 	} else if (m_nMenuFadeAlpha > 255)
 		m_nMenuFadeAlpha = 255;

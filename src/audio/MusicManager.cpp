@@ -114,7 +114,7 @@ cMusicManager::ResetMusicAfterReload()
 		aListenTimeArray[i] = afRadioTime[i];
 		int32 trackPos = GetSavedRadioStationPosition(i);
 		if (trackPos != -1) {
-			if (trackPos > m_aTracks[i].m_nLength) {
+			if (m_aTracks[i].m_nLength != 0 && trackPos > m_aTracks[i].m_nLength) {
 				debug("Radio Track %d saved position is %d, Length is only %d\n", i, trackPos, m_aTracks[i].m_nLength);
 				trackPos %= m_aTracks[i].m_nLength;
 			}
@@ -164,7 +164,7 @@ cMusicManager::SetStartingTrackPositions(bool8 isNewGameTimer)
 
 			if (i < STREAMED_SOUND_CITY_AMBIENT && isNewGameTimer)
 				m_aTracks[i].m_nPosition = NewGameRadioTimers[i];
-			else if (i < STREAMED_SOUND_ANNOUNCE_BRIDGE_CLOSED)
+			else if (i < STREAMED_SOUND_ANNOUNCE_BRIDGE_CLOSED && m_aTracks[i].m_nLength != 0)
 				m_aTracks[i].m_nPosition = (pos * AudioManager.m_anRandomTable[i % 5]) % m_aTracks[i].m_nLength;
 			else
 				m_aTracks[i].m_nPosition = 0;
@@ -232,7 +232,7 @@ cMusicManager::SetRadioChannelByScript(uint32 station, int32 pos)
 		if (station <= STREAMED_SOUND_RADIO_POLICE) {
 			m_bRadioSetByScript = TRUE;
 			m_nRadioStationScript = station;
-			m_nRadioPosition = pos == -1 ? -1 : pos % m_aTracks[station].m_nLength;
+			m_nRadioPosition = pos == -1 || m_aTracks[station].m_nLength == 0 ? pos : pos % m_aTracks[station].m_nLength;
 		}
 	}
 }
@@ -1192,7 +1192,7 @@ cMusicManager::GetTrackStartPos(uint32 track)
 	else
 		m_aTracks[track].m_nLastPosCheckTimer = CTimer::GetTimeInMillisecondsPauseMode();
 
-	if (pos > m_aTracks[track].m_nLength)
+	if (m_aTracks[track].m_nLength != 0 && pos > m_aTracks[track].m_nLength)
 		pos %= m_aTracks[track].m_nLength;
 	return pos;
 }

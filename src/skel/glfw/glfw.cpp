@@ -65,6 +65,7 @@ long _dwOperatingSystemVersion;
 
 #if __EMSCRIPTEN__
 #include <emscripten.h>
+#include "HttpAssets.h"
 #endif
 
 #ifdef _WIN32
@@ -104,6 +105,32 @@ static psGlobalType PsGlobal;
 size_t _dwMemAvailPhys;
 RwUInt32 gGameState;
 
+#ifdef __EMSCRIPTEN__
+bool g_InsideGameProcess = false;
+static int s_assetPump;
+
+bool
+RsGameIsPlaying()
+{
+	return gGameState == GS_PLAYING_GAME;
+}
+
+// Draw another frame while a download is still in flight, unless this call
+// is already inside the game update (that update must finish before a new one).
+void
+RsPumpFrameDuringAssetLoad()
+{
+	if (s_assetPump || g_InsideGameProcess)
+		return;
+	if (!RwInitialised || !ForegroundApp || gGameState != GS_PLAYING_GAME)
+		return;
+	s_assetPump = 1;
+	glfwPollEvents();
+	RsEventHandler(rsIDLE, (void *)TRUE);
+	s_assetPump = 0;
+}
+#endif
+
 #ifdef DETECT_JOYSTICK_MENU
 char gSelectedJoystickName[128] = "";
 #endif
@@ -127,14 +154,11 @@ void _psCreateFolder(const char *path)
 		CloseHandle(hfle);
 #else
 	struct stat info;
-	char fullpath[PATH_MAX];
-	realpath(path, fullpath);
-
-	if (lstat(fullpath, &info) != 0) {
-		if (errno == ENOENT || (errno != EACCES && !S_ISDIR(info.st_mode))) {
-			mkdir(fullpath, 0755);
-		}
-	}
+	// realpath fails when the folder does not exist yet, which is the usual
+	// case for a first save. Create the path as given.
+	if (stat(path, &info) == 0 && S_ISDIR(info.st_mode))
+		return;
+	mkdir(path, 0755);
 #endif
 }
 
@@ -428,6 +452,12 @@ psInitialize(void)
 	PsGlobal.joy2id	= -1;
 
 	CFileMgr::Initialise();
+
+#ifdef __EMSCRIPTEN__
+	// Files that are not in the data bundle are fetched from ASSETS_URL and
+	// cached in the IndexedDB filesystem mounted at HOME.
+	HttpAssets::Init();
+#endif
 	
 #ifdef PS2_MENU
 	CPad::Initialise();
@@ -1070,6 +1100,10 @@ bool _InputMouseNeedsExclusive()
 	return !(vm.flags & rwVIDEOMODEEXCLUSIVE) || lastCursorMode == GLFW_CURSOR_HIDDEN;
 }
 
+#ifdef __EMSCRIPTEN__
+static void SyncCursorInsideCanvas(void);
+#endif
+
 void psPostRWinit(void)
 {
 	RwVideoMode vm;
@@ -1083,6 +1117,9 @@ void psPostRWinit(void)
 	glfwSetScrollCallback(PSGLOBAL(window), scrollCB);
 	glfwSetCursorPosCallback(PSGLOBAL(window), cursorCB);
 	glfwSetCursorEnterCallback(PSGLOBAL(window), cursorEnterCB);
+#ifdef __EMSCRIPTEN__
+	SyncCursorInsideCanvas();
+#endif
 #endif
 	glfwSetWindowIconifyCallback(PSGLOBAL(window), windowIconifyCB);
 	glfwSetWindowFocusCallback(PSGLOBAL(window), windowFocusCB);
@@ -1882,6 +1919,30 @@ cursorEnterCB(GLFWwindow* window, int entered) {
 	PSGLOBAL(cursorIsInWindow) = !!entered;
 }
 
+#ifdef __EMSCRIPTEN__
+// mouseenter is not sent if the pointer is already over the canvas when the
+// listener is installed, so clicks are ignored until the pointer leaves and
+// comes back. A button press can only land on the canvas, so that counts too.
+static void
+SyncCursorInsideCanvas(void)
+{
+	if (PSGLOBAL(cursorIsInWindow) || !PSGLOBAL(window))
+		return;
+
+	int inside = EM_ASM_INT({
+		var canvas = Module['canvas'] || document.querySelector('canvas');
+		return canvas && canvas.matches(':hover') ? 1 : 0;
+	});
+	if (!inside) {
+		inside = glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS
+			|| glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_RIGHT) == GLFW_PRESS
+			|| glfwGetMouseButton(PSGLOBAL(window), GLFW_MOUSE_BUTTON_MIDDLE) == GLFW_PRESS;
+	}
+	if (inside)
+		PSGLOBAL(cursorIsInWindow) = true;
+}
+#endif
+
 void
 windowFocusCB(GLFWwindow* window, int focused) {
 	WindowFocused = !!focused;
@@ -1890,6 +1951,60 @@ windowFocusCB(GLFWwindow* window, int focused) {
 void
 windowIconifyCB(GLFWwindow* window, int iconified) {
 	WindowIconified = !!iconified;
+}
+
+/*
+ * Desktop leaves the frame loop when a save load or new game is requested,
+ * then runs this. Emscripten never returns from emscripten_set_main_loop, so
+ * the same sequence has to run from the frame callback or the session keeps
+ * going with audio already faded out.
+ */
+static void
+RestartGame(void)
+{
+	FrontEndMenuManager.UnloadTextures();
+
+	CPad::ResetCheats();
+	CPad::StopPadsShaking();
+
+	DMAudio.ChangeMusicMode(MUSICMODE_DISABLE);
+
+	CTimer::Stop();
+
+	if ( FrontEndMenuManager.m_bWantToLoad )
+	{
+		CGame::ShutDownForRestart();
+		CGame::InitialiseWhenRestarting();
+		DMAudio.ChangeMusicMode(MUSICMODE_GAME);
+		LoadSplash(GetLevelSplashScreen(CGame::currLevel));
+		FrontEndMenuManager.m_bWantToLoad = false;
+	}
+	else
+	{
+#ifndef MASTER
+		if ( gbModelViewer )
+			CAnimViewer::Shutdown();
+		else
+#endif
+		if ( gGameState == GS_PLAYING_GAME )
+			CGame::ShutDown();
+
+		CTimer::Stop();
+
+		if ( FrontEndMenuManager.m_bFirstTime == true )
+		{
+			gGameState = GS_INIT_FRONTEND;
+			TRACE("gGameState = GS_INIT_FRONTEND;");
+		}
+		else
+		{
+			gGameState = GS_INIT_PLAYING_GAME;
+			TRACE("gGameState = GS_INIT_PLAYING_GAME;");
+		}
+	}
+
+	FrontEndMenuManager.m_bFirstTime = false;
+	FrontEndMenuManager.m_bWantToRestart = false;
 }
 
 /*
@@ -1922,12 +2037,26 @@ WinMain(HINSTANCE instance,
 static void main_loop()
 {
 #if __EMSCRIPTEN__
-	if (RsGlobal.quit || FrontEndMenuManager.m_bWantToRestart || glfwWindowShouldClose(PSGLOBAL(window))) {
-		//emscripten_cancel_main_loop();
-		//return;
+	static bool s_inRestart = false;
+	if (s_inRestart)
+		return;
+
+	if (RsGlobal.quit || glfwWindowShouldClose(PSGLOBAL(window))) {
+		emscripten_cancel_main_loop();
+		return;
+	}
+	if (FrontEndMenuManager.m_bWantToRestart) {
+		s_inRestart = true;
+		RwInitialised = FALSE;
+		RestartGame();
+		RwInitialised = TRUE;
+		s_inRestart = false;
 	}
 #endif
 	glfwPollEvents();
+#ifdef __EMSCRIPTEN__
+	SyncCursorInsideCanvas();
+#endif
 #ifdef GET_KEYBOARD_INPUT_FROM_X11
 	checkKeyPresses();
 #endif
@@ -2395,27 +2524,20 @@ main(int argc, char *argv[])
 		*/
 		RwInitialised = FALSE;
 
-		FrontEndMenuManager.UnloadTextures();
 #ifdef PS2_MENU
+		FrontEndMenuManager.UnloadTextures();
 		if ( !(FrontEndMenuManager.m_bWantToRestart || TheMemoryCard.b_FoundRecentSavedGameWantToLoad))
 			break;
-#else
-		if ( !FrontEndMenuManager.m_bWantToRestart )
-			break;
-#endif
 
 		CPad::ResetCheats();
 		CPad::StopPadsShaking();
 
 		DMAudio.ChangeMusicMode(MUSICMODE_DISABLE);
 
-#ifdef PS2_MENU
 		CGame::ShutDownForRestart();
-#endif
 
 		CTimer::Stop();
 
-#ifdef PS2_MENU
 		if (FrontEndMenuManager.m_bWantToRestart || TheMemoryCard.b_FoundRecentSavedGameWantToLoad)
 		{
 			if (TheMemoryCard.b_FoundRecentSavedGameWantToLoad)
@@ -2436,40 +2558,13 @@ main(int argc, char *argv[])
 
 		break;
 #else
-		if ( FrontEndMenuManager.m_bWantToLoad )
+		if ( !FrontEndMenuManager.m_bWantToRestart )
 		{
-			CGame::ShutDownForRestart();
-			CGame::InitialiseWhenRestarting();
-			DMAudio.ChangeMusicMode(MUSICMODE_GAME);
-			LoadSplash(GetLevelSplashScreen(CGame::currLevel));
-			FrontEndMenuManager.m_bWantToLoad = false;
-		}
-		else
-		{
-#ifndef MASTER
-			if ( gbModelViewer )
-				CAnimViewer::Shutdown();
-			else
-#endif
-			if ( gGameState == GS_PLAYING_GAME )
-				CGame::ShutDown();
-
-			CTimer::Stop();
-
-			if ( FrontEndMenuManager.m_bFirstTime == true )
-			{
-				gGameState = GS_INIT_FRONTEND;
-				TRACE("gGameState = GS_INIT_FRONTEND;");
-			}
-			else
-			{
-				gGameState = GS_INIT_PLAYING_GAME;
-				TRACE("gGameState = GS_INIT_PLAYING_GAME;");
-			}
+			FrontEndMenuManager.UnloadTextures();
+			break;
 		}
 
-		FrontEndMenuManager.m_bFirstTime = false;
-		FrontEndMenuManager.m_bWantToRestart = false;
+		RestartGame();
 #endif
 	}
 	

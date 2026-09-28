@@ -13,6 +13,7 @@
 #include "ColStore.h"
 #include "VarConsole.h"
 #include "Pools.h"
+#include "HttpAssets.h"
 
 CPool<ColDef,ColDef> *CColStore::ms_pColPool;
 #ifndef MASTER
@@ -233,13 +234,19 @@ CColStore::EnsureCollisionIsInMemory(const CVector2D &pos)
 	for(i = 1; i < COLSTORESIZE; i++)
 		if(GetSlot(i) && GetBoundingBox(i).IsPointInside(pos, -110.0f) &&
 		   !CStreaming::HasColLoaded(i)){
-			CStreaming::RequestCol(i, 0);
+			CStreaming::RequestCol(i, STREAMFLAGS_PRIORITY);
+			// HTTP reads finish on a later frame. Waiting here freezes the game
+			// for the whole download; LoadRequestedModels picks the request up.
+			if (HttpAssets::IsActive())
+				continue;
 			if(TheCamera.GetScreenFadeStatus() == FADE_0)
 				FrontEndMenuManager.MessageScreen("LOADCOL", false);
 			CTimer::Suspend();
 			CStreaming::LoadAllRequestedModels(false);
 			CTimer::Resume();
 		}
+	if (HttpAssets::IsActive())
+		CStreaming::LoadRequestedModels();
 }
 
 bool
