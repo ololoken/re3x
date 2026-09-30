@@ -1811,23 +1811,30 @@ CStreaming::StreamZoneModels(const CVector &pos)
 			}
 		// And load a new one
 		if(i != NUMMODELSPERPEDGROUP || ms_numPedsLoaded < MAXZONEPEDSLOADED){
+			// Every slot can already be flagged loaded. An unbounded search
+			// then spins forever on the main thread (frozen frame, audio loop).
+			int attempts = NUMMODELSPERPEDGROUP;
 			do
 				j = CGeneral::GetRandomNumberInRange(0, NUMMODELSPERPEDGROUP);
-			while(ms_bIsPedFromPedGroupLoaded[j]);
-			if(ms_numPedsLoaded == MAXZONEPEDSLOADED)
-				ms_bIsPedFromPedGroupLoaded[i] = false;
-			ms_bIsPedFromPedGroupLoaded[j] = true;
-			int newMI = CPopulation::ms_pPedGroups[ms_currentPedGrp].models[j];
-			if(newMI != oldMI){
-				RequestModel(newMI, STREAMFLAGS_DEPENDENCY);
-				debug("Request Ped %s\n", CModelInfo::GetModelInfo(newMI)->GetModelName());
-				if(ms_numPedsLoaded == MAXZONEPEDSLOADED){
-					SetModelIsDeletable(oldMI);
-					SetModelTxdIsDeletable(oldMI);
-					debug("Remove Ped %s\n", CModelInfo::GetModelInfo(oldMI)->GetModelName());
-				}else
-					ms_numPedsLoaded++;
+			while(ms_bIsPedFromPedGroupLoaded[j] && --attempts);
+			if(ms_bIsPedFromPedGroupLoaded[j]){
 				timeBeforeNextLoad = 300;
+			}else{
+				if(ms_numPedsLoaded == MAXZONEPEDSLOADED)
+					ms_bIsPedFromPedGroupLoaded[i] = false;
+				ms_bIsPedFromPedGroupLoaded[j] = true;
+				int newMI = CPopulation::ms_pPedGroups[ms_currentPedGrp].models[j];
+				if(newMI != oldMI){
+					RequestModel(newMI, STREAMFLAGS_DEPENDENCY);
+					debug("Request Ped %s\n", CModelInfo::GetModelInfo(newMI)->GetModelName());
+					if(ms_numPedsLoaded == MAXZONEPEDSLOADED){
+						SetModelIsDeletable(oldMI);
+						SetModelTxdIsDeletable(oldMI);
+						debug("Remove Ped %s\n", CModelInfo::GetModelInfo(oldMI)->GetModelName());
+					}else
+						ms_numPedsLoaded++;
+					timeBeforeNextLoad = 300;
+				}
 			}
 		}
 	}
@@ -2463,14 +2470,6 @@ CStreaming::LoadAllRequestedModels(bool priority)
 void
 CStreaming::LoadAllRequestedModels(bool priority)
 {
-#ifdef __EMSCRIPTEN__
-	// The per-frame streamer finishes these reads. Waiting here holds the
-	// frame inside CdStreamSync until every download completes.
-	if (HttpAssets::IsActive() && gGameState == GS_PLAYING_GAME) {
-		LoadRequestedModels();
-		return;
-	}
-#endif
 	static bool bInsideLoadAll = false;
 	int imgOffset, streamId, status;
 	int i;
@@ -2499,9 +2498,22 @@ CStreaming::LoadAllRequestedModels(bool priority)
 		DecrementRef(streamId);
 
 		if(ms_aInfoForModel[streamId].GetCdPosnAndSize(posn, size)){
-			do
+			int tries = 0;
+			int32 syncStatus;
+			// A failed HTTP read used to retry forever: CdStreamSync returns
+			// STREAM_ERROR, which keeps this condition true.
+			do {
 				status = CdStreamRead(0, ms_pStreamingBuffer[0], imgOffset+posn, size);
-			while(CdStreamSync(0) || status == STREAM_NONE);
+				syncStatus = CdStreamSync(0);
+			} while((syncStatus || status == STREAM_NONE) && ++tries < 8);
+			if(syncStatus || status == STREAM_NONE){
+				printf("LoadAllRequestedModels: giving up on stream id %d (read %d sync %d)\n",
+				       streamId, status, syncStatus);
+				int32 flags = ms_aInfoForModel[streamId].m_flags;
+				ms_aInfoForModel[streamId].m_loadState = STREAMSTATE_NOTLOADED;
+				RequestModel(streamId, flags);
+				break;
+			}
 			ms_aInfoForModel[streamId].m_loadState = STREAMSTATE_READING;
 
 			MakeSpaceFor(size * CDSTREAM_SECTOR_SIZE);

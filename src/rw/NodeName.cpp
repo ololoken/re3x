@@ -35,8 +35,17 @@ NodeNameCopy(void *dstObject, const void *srcObject, RwInt32 offsetInObject, RwI
 RwStream*
 NodeNameStreamRead(RwStream *stream, RwInt32 binaryLength, void *object, RwInt32 offsetInObject, RwInt32 sizeInObject)
 {
-	RwStreamRead(stream, NODENAMEEXT(object), binaryLength);
-	NODENAMEEXT(object)[binaryLength] = '\0';
+	// The extension is 24 bytes. A longer chunk (corrupt or truncated dff)
+	// used to write past the frame and zero the next allocation, which
+	// later shows up as a null sync callback.
+	int32 n = binaryLength;
+	if(n > 23)
+		n = 23;
+	if(n > 0)
+		RwStreamRead(stream, NODENAMEEXT(object), n);
+	NODENAMEEXT(object)[n] = '\0';
+	if(binaryLength > n)
+		RwStreamSkip(stream, binaryLength - n);
 	return stream;
 }
 

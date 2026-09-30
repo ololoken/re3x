@@ -43,6 +43,30 @@ HttpAssets::Read(const char *, void *, uint32_t)
 	return 0;
 }
 
+bool
+HttpAssets::IsLocal(const char *)
+{
+	return false;
+}
+
+uint32_t
+HttpAssets::LocalSize(const char *)
+{
+	return 0;
+}
+
+void
+HttpAssets::RemoveLocal(const char *)
+{
+}
+
+void
+HttpAssets::FetchToMemory(const char *, void (*done)(bool, const uint8_t *, uint32_t, void *), void *user)
+{
+	if (done)
+		done(false, nullptr, 0, user);
+}
+
 void
 HttpAssets::ClearImage(int)
 {

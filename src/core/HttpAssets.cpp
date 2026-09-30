@@ -131,6 +131,66 @@ alreadyCached(const char *relPath, const std::string &key)
 	return false;
 }
 
+// Path of a cached file, and its size. Empty when nothing is local.
+bool
+localFile(const char *relPath, std::string &out, uint32_t *sizeOut)
+{
+	std::string key = assetCacheKey(relPath);
+	auto take = [&](const std::string &path) {
+		struct stat st;
+		if (stat(path.c_str(), &st) != 0 || !S_ISREG(st.st_mode))
+			return false;
+		out = path;
+		if (sizeOut)
+			*sizeOut = (uint32_t)st.st_size;
+		return true;
+	};
+	if (take(key))
+		return true;
+	std::string given = normalizeSlashes(relPath);
+	if (given != key && take(given))
+		return true;
+	if (relPath && take(relPath))
+		return true;
+	return false;
+}
+
+struct MemOp {
+	std::string key;
+	std::string url;
+	void (*done)(bool, const uint8_t *, uint32_t, void *);
+	void *user;
+};
+
+void
+finishMemFetch(emscripten_fetch_t *fetch, bool httpOk)
+{
+	MemOp *op = (MemOp *)fetch->userData;
+	int status = fetch->status;
+	const uint8_t *data = (const uint8_t *)fetch->data;
+	uint32_t size = (uint32_t)fetch->numBytes;
+	bool ok = httpOk && status == 200 && data && size > 0;
+	if (!ok && status == 404)
+		g_missing.insert(op->key);
+	if (!ok && status != 404)
+		printf("HttpAssets: %s%s failed (%d)\n", g_root.c_str(), op->key.c_str(), status);
+	op->done(ok, ok ? data : nullptr, ok ? size : 0, op->user);
+	emscripten_fetch_close(fetch);
+	delete op;
+}
+
+void
+onMemFetch(emscripten_fetch_t *fetch)
+{
+	finishMemFetch(fetch, true);
+}
+
+void
+onMemFetchError(emscripten_fetch_t *fetch)
+{
+	finishMemFetch(fetch, false);
+}
+
 void
 ensureParentDirs(const char *path)
 {
@@ -501,6 +561,67 @@ HttpAssets::Read(const char *relPath, void *outBuf, uint32_t cap)
 	size_t n = fread(outBuf, 1, cap, f);
 	fclose(f);
 	return (uint32_t)n;
+}
+
+bool
+HttpAssets::IsLocal(const char *relPath)
+{
+	std::string path;
+	return localFile(relPath, path, nullptr);
+}
+
+uint32_t
+HttpAssets::LocalSize(const char *relPath)
+{
+	std::string path;
+	uint32_t size = 0;
+	if (!localFile(relPath, path, &size))
+		return 0;
+	return size;
+}
+
+void
+HttpAssets::RemoveLocal(const char *relPath)
+{
+	std::string path;
+	if (localFile(relPath, path, nullptr))
+		remove(path.c_str());
+}
+
+void
+HttpAssets::FetchToMemory(const char *relPath,
+                          void (*done)(bool ok, const uint8_t *data, uint32_t size, void *user),
+                          void *user)
+{
+	if (!done || !relPath) {
+		if (done)
+			done(false, nullptr, 0, user);
+		return;
+	}
+	if (!g_active) {
+		done(false, nullptr, 0, user);
+		return;
+	}
+	std::string key = assetCacheKey(relPath);
+	if (unsafePath(key) || !isRemoteMember(key) || g_missing.count(key)) {
+		done(false, nullptr, 0, user);
+		return;
+	}
+
+	MemOp *op = new MemOp;
+	op->key = std::move(key);
+	op->url = g_root + op->key + "?v=1";
+	op->done = done;
+	op->user = user;
+
+	emscripten_fetch_attr_t attr;
+	emscripten_fetch_attr_init(&attr);
+	strcpy(attr.requestMethod, "GET");
+	attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+	attr.userData = op;
+	attr.onsuccess = onMemFetch;
+	attr.onerror = onMemFetchError;
+	emscripten_fetch(&attr, op->url.c_str());
 }
 
 void

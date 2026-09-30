@@ -437,6 +437,13 @@ CdStreamSync(int32 channel)
 #ifndef __EMSCRIPTEN__
 			sem_wait(pChannel->pDoneSemaphore);
 #else
+			// setInterval never gets a turn here: this wait runs inside the
+			// frame callback, and the next animation frame returns immediately
+			// while g_InsideGameProcess is set. Start the HTTP read on this
+			// stack; emscripten_sleep then lets the fetch callback finish it.
+			CdStreamAsyncThread();
+			if (!(pChannel->bLocked && pChannel->nSectorsToRead != 0))
+				break;
 			RsPumpFrameDuringAssetLoad();
 			emscripten_sleep(0);
 #endif

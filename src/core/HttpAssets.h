@@ -24,6 +24,20 @@ namespace HttpAssets {
 	// Read a file that is already local. Returns bytes copied, or 0.
 	uint32_t Read(const char *relPath, void *outBuf, uint32_t cap);
 
+	// True when a previous download left this file in the local cache.
+	bool IsLocal(const char *relPath);
+	// Size of that cache file, or 0 when it is not local.
+	uint32_t LocalSize(const char *relPath);
+	// Drop a cached copy so a later IndexedDB sync does not keep rewriting it.
+	void RemoveLocal(const char *relPath);
+
+	// Download a remote file into memory. Does not write the save filesystem,
+	// so IndexedDB will not keep rewriting a large radio track. `data` is
+	// only valid for the duration of `done`.
+	void FetchToMemory(const char *relPath,
+	                   void (*done)(bool ok, const uint8_t *data, uint32_t size, void *user),
+	                   void *user);
+
 	// Map a sector range inside an .img to an unpacked relative path
 	// (models/gta3/<name>, filled in by the streaming directory loader).
 	void ClearImage(int image);

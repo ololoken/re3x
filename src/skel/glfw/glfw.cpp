@@ -2037,6 +2037,10 @@ WinMain(HINSTANCE instance,
 static void main_loop()
 {
 #if __EMSCRIPTEN__
+	// CdStreamSync yields with emscripten_sleep while CGame::Process is on the
+	// stack (LOAD_ALL_MODELS_NOW). A new animation frame must not re-enter Idle.
+	if (g_InsideGameProcess)
+		return;
 	static bool s_inRestart = false;
 	if (s_inRestart)
 		return;

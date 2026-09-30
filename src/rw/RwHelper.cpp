@@ -206,8 +206,15 @@ GetFirstTexture(RwTexDictionary *txd)
 bool
 IsClumpSkinned(RpClump *clump)
 {
+	if(clump == nil || RwObjectGetType((RwObject*)clump) != rpCLUMP)
+		return false;
 	RpAtomic *atomic = GetFirstAtomic(clump);
-	return atomic ? RpSkinGeometryGetSkin(RpAtomicGetGeometry(atomic)) : nil;
+	if(atomic == nil || RwObjectGetType((RwObject*)atomic) != rpATOMIC)
+		return false;
+	RpGeometry *geo = RpAtomicGetGeometry(atomic);
+	if(geo == nil)
+		return false;
+	return RpSkinGeometryGetSkin(geo) != nil;
 }
 
 static RpAtomic*

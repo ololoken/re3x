@@ -121,6 +121,7 @@ class CStream
 	
 	bool     m_bPaused;
 	bool     m_bActive;
+	bool     m_bQueuedAudio;
 	
 public:
 #ifdef MULTITHREADED_AUDIO
@@ -134,6 +135,7 @@ public:
 #endif
 
 	void    *m_pBuffer;
+	uint32   m_nBufferBytes;
 	
 	bool     m_bReset;
 	uint32   m_nVolume;

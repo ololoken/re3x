@@ -415,14 +415,20 @@ CEntity::PreRender(void)
 void
 CEntity::Render(void)
 {
-	if(m_rwObject){
-		bImBeingRendered = true;
-		if(RwObjectGetType(m_rwObject) == rpATOMIC)
-			RpAtomicRender((RpAtomic*)m_rwObject);
-		else
-			RpClumpRender((RpClump*)m_rwObject);
-		bImBeingRendered = false;
-	}
+	if(m_rwObject == nil)
+		return;
+	// Anything that is not an atomic used to be rendered as a clump. A frame
+	// (type 0) or a zeroed block has its next pointer at the same offset as
+	// Clump::atomics, and that pointer is nil, so the clump walk faults.
+	uint8 type = RwObjectGetType(m_rwObject);
+	if(type != rpATOMIC && type != rpCLUMP)
+		return;
+	bImBeingRendered = true;
+	if(type == rpATOMIC)
+		RpAtomicRender((RpAtomic*)m_rwObject);
+	else
+		RpClumpRender((RpClump*)m_rwObject);
+	bImBeingRendered = false;
 }
 
 bool

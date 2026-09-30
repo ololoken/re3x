@@ -444,6 +444,10 @@ void
 CPed::SetModelIndex(uint32 mi)
 {
 	CEntity::SetModelIndex(mi);
+	// Dress/undress can run before the special model has streamed in. The
+	// instance is then missing or not a clump, and anim init reads it as one.
+	if(m_rwObject == nil || RwObjectGetType(m_rwObject) != rpCLUMP)
+		return;
 	RpAnimBlendClumpInit(GetClump());
 	RpAnimBlendClumpFillFrameArray(GetClump(), m_pFrames);
 	CPedModelInfo *modelInfo = (CPedModelInfo *)CModelInfo::GetModelInfo(GetModelIndex());
@@ -9582,8 +9586,21 @@ void
 CPed::Dress(void)
 {
 	int mi = GetModelIndex();
+	CBaseModelInfo *info = CModelInfo::GetModelInfo(mi);
+	// Undress already requested the replacement. Finish that read before
+	// cloning it; otherwise SetModelIndex builds nothing and anim init faults.
+	if(info && info->GetRwObject() == nil){
+		if(CStreaming::HasModelLoaded(mi))
+			CStreaming::RemoveModel(mi);
+		CStreaming::RequestModel(mi, STREAMFLAGS_DEPENDENCY | STREAMFLAGS_SCRIPTOWNED);
+		CStreaming::LoadAllRequestedModels(false);
+	}
 	m_modelIndex = -1;
 	SetModelIndex(mi);
+	if(m_rwObject == nil || RwObjectGetType(m_rwObject) != rpCLUMP){
+		debug("CPed::Dress: %s is not a clump\n", info ? info->GetModelName() : "unknown");
+		return;
+	}
 	m_nPedState = PED_IDLE;
 	m_nLastPedState = PED_NONE;
 	m_objective = OBJECTIVE_NONE;

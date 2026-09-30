@@ -21,8 +21,12 @@
 #include <opusfile.h>
 #endif
 
+#include <cstring>
+#include <memory>
 #include <queue>
+#include <string>
 #include <utility>
+#include <vector>
 
 #ifdef MULTITHREADED_AUDIO
 #include <iostream>
@@ -689,6 +693,222 @@ public:
 	}
 };
 
+// Radio replacements are whole-station mp3s (fever.mp3 is about 30MB).
+// Writing one into the IndexedDB-backed filesystem makes later save syncs
+// rewrite it and the frame rate stays down. Keep the bytes in memory instead.
+class CRemoteMp3 : public IDecoder
+{
+	struct Gate {
+		CRemoteMp3 *self;
+	};
+	struct Hold {
+		std::shared_ptr<Gate> gate;
+	};
+
+	std::string m_path;
+	std::shared_ptr<Gate> m_gate;
+	std::vector<uint8_t> m_data;
+	size_t m_pos;
+	mpg123_handle *m_pMH;
+	bool m_bOpened;
+	bool m_bFailed;
+	bool m_bReady;
+	bool m_bStarted;
+	uint32 m_nRate;
+	uint32 m_nChannels;
+	int m_seekMs;
+
+	static ssize_t r_read(void *fh, void *buf, size_t size)
+	{
+		CRemoteMp3 *self = (CRemoteMp3 *)fh;
+		if (self->m_pos >= self->m_data.size())
+			return 0;
+		size_t left = self->m_data.size() - self->m_pos;
+		if (size > left)
+			size = left;
+		memcpy(buf, self->m_data.data() + self->m_pos, size);
+		self->m_pos += size;
+		return (ssize_t)size;
+	}
+
+	static off_t r_seek(void *fh, off_t pos, int whence)
+	{
+		CRemoteMp3 *self = (CRemoteMp3 *)fh;
+		off_t n = (off_t)self->m_data.size();
+		off_t at = (off_t)self->m_pos;
+		if (whence == SEEK_SET)
+			at = pos;
+		else if (whence == SEEK_CUR)
+			at += pos;
+		else
+			at = n + pos;
+		if (at < 0)
+			at = 0;
+		if (at > n)
+			at = n;
+		self->m_pos = (size_t)at;
+		return at;
+	}
+
+	static void r_close(void *) {}
+
+	static void OnFetched(bool ok, const uint8_t *data, uint32_t size, void *user)
+	{
+		Hold *hold = (Hold *)user;
+		CRemoteMp3 *self = hold->gate->self;
+		delete hold;
+		if (!self)
+			return;
+		if (!ok || !data || size == 0) {
+			self->m_bFailed = true;
+			return;
+		}
+		self->m_data.assign(data, data + size);
+		self->OpenDecoder();
+	}
+
+	void OpenDecoder()
+	{
+		long rate = 0;
+		int channels = 0;
+		int encoding = 0;
+		m_pos = 0;
+		// The Xing/LAME header in these station dumps names fewer frames than
+		// the file contains. Honoring it prints "Frankenstein" and inserts a
+		// gap at that boundary. The byte size of the buffer is the real end.
+		mpg123_set_filesize(m_pMH, (off_t)m_data.size());
+		m_bReady = mpg123_replace_reader_handle(m_pMH, r_read, r_seek, r_close) == MPG123_OK
+			&& mpg123_open_handle(m_pMH, this) == MPG123_OK
+			&& mpg123_getformat(m_pMH, &rate, &channels, &encoding) == MPG123_OK
+			&& rate != 0;
+		if (!m_bReady)
+			return;
+		m_nRate = (uint32)rate;
+		m_nChannels = (uint32)channels;
+		if (m_seekMs >= 0) {
+			mpg123_seek(m_pMH, (off_t)ms2samples((uint32)m_seekMs), SEEK_SET);
+			m_seekMs = -1;
+		}
+	}
+
+public:
+	CRemoteMp3(const char *path) :
+		m_path(path ? path : ""),
+		m_pos(0),
+		m_pMH(nil),
+		m_bOpened(false),
+		m_bFailed(false),
+		m_bReady(false),
+		m_bStarted(false),
+		m_nRate(0),
+		m_nChannels(0),
+		m_seekMs(-1)
+	{
+		m_gate = std::make_shared<Gate>();
+		m_gate->self = this;
+		m_pMH = mpg123_new(nil, nil);
+		if (!m_pMH)
+			return;
+		mpg123_param(m_pMH, MPG123_FLAGS, MPG123_IGNORE_STREAMLENGTH | MPG123_FORCE_SEEKABLE | MPG123_FUZZY | MPG123_SKIP_ID3V2 | MPG123_AUTO_RESAMPLE, 0.0);
+		mpg123_param(m_pMH, MPG123_REMOVE_FLAGS, MPG123_GAPLESS | MPG123_NO_FRANKENSTEIN, 0.0);
+		// A station dump changes rate at track boundaries. Locking the
+		// decoder to the first rate makes later frames fail with
+		// "Unable to set up output format".
+		mpg123_param(m_pMH, MPG123_RESYNC_LIMIT, 65536, 0.0);
+		mpg123_format_none(m_pMH);
+		mpg123_format2(m_pMH, 0, MPG123_MONO | MPG123_STEREO, MPG123_ENC_SIGNED_16);
+		m_bOpened = true;
+		Hold *hold = new Hold;
+		hold->gate = m_gate;
+		HttpAssets::FetchToMemory(m_path.c_str(), OnFetched, hold);
+	}
+
+	~CRemoteMp3()
+	{
+		if (m_gate)
+			m_gate->self = nil;
+		if (m_pMH) {
+			mpg123_close(m_pMH);
+			mpg123_delete(m_pMH);
+			m_pMH = nil;
+		}
+	}
+
+	void FileOpen() {}
+
+	bool IsOpened()
+	{
+		return m_bOpened && !m_bFailed;
+	}
+
+	uint32 GetSampleSize()
+	{
+		return sizeof(uint16);
+	}
+
+	uint32 GetSampleCount()
+	{
+		return 0;
+	}
+
+	uint32 GetSampleRate()
+	{
+		return m_nRate ? m_nRate : 44100;
+	}
+
+	uint32 GetChannels()
+	{
+		return m_nChannels ? m_nChannels : 2;
+	}
+
+	void Seek(uint32 milliseconds)
+	{
+		if (!m_bStarted && milliseconds == 0)
+			return;
+		if (!m_bReady) {
+			m_seekMs = (int)milliseconds;
+			return;
+		}
+		mpg123_seek(m_pMH, (off_t)ms2samples(milliseconds), SEEK_SET);
+	}
+
+	uint32 Tell()
+	{
+		if (!m_bReady || !m_pMH)
+			return 0;
+		off_t at = mpg123_tell(m_pMH);
+		if (at < 0)
+			return 0;
+		return samples2ms((uint32)at);
+	}
+
+	uint32 Decode(void *buffer)
+	{
+		if (m_bFailed)
+			return 0;
+		if (!m_bReady)
+			return 0;
+		size_t got = 0;
+		int err = mpg123_read(m_pMH, (unsigned char *)buffer, GetBufferSize(), &got);
+		if (err == MPG123_NEW_FORMAT) {
+			long rate = 0;
+			int channels = 0;
+			int encoding = 0;
+			if (mpg123_getformat(m_pMH, &rate, &channels, &encoding) == MPG123_OK && rate != 0) {
+				m_nRate = (uint32)rate;
+				m_nChannels = (uint32)channels;
+			}
+			err = mpg123_read(m_pMH, (unsigned char *)buffer, GetBufferSize(), &got);
+		}
+		if (got == 0)
+			return 0;
+		m_bStarted = true;
+		if (GetChannels() == 2)
+			SortStereoBuffer.SortStereo(buffer, got);
+		return (uint32)got;
+	}
+};
+
 #endif
 #define VAG_LINE_SIZE (0x10)
 #define VAG_SAMPLES_IN_LINE (28)
@@ -1053,8 +1273,11 @@ CStream::BuffersShouldBeFilled()
 #endif
 	if ( FillBuffers() != 0 )
 	{
+		m_bQueuedAudio = true;
 		SetPlay(true);
 	}
+	else
+		m_bActive = true;
 }
 
 // returns whether it's queued (not on multi-thread)
@@ -1221,6 +1444,7 @@ CStream::CStream(ALuint *sources, ALuint (&buffers)[NUM_STREAMBUFFERS]) :
 	m_pBuffer(nil),
 	m_bPaused(false),
 	m_bActive(false),
+	m_bQueuedAudio(false),
 #ifdef MULTITHREADED_AUDIO
 	m_bIExist(false),
 	m_bDoSeek(false),
@@ -1232,7 +1456,8 @@ CStream::CStream(ALuint *sources, ALuint (&buffers)[NUM_STREAMBUFFERS]) :
 	m_nPan(0),
 	m_nPosBeforeReset(0),
 	m_nLoopCount(1),
-	m_bWaitingForFile(false)
+	m_bWaitingForFile(false),
+	m_nBufferBytes(0)
 	
 {
 }
@@ -1245,6 +1470,37 @@ EndsWithMp3(const char *filename)
 		return false;
 	len = strlen(filename);
 	return len >= 4 && !strcasecmp(filename + len - 4, ".mp3");
+}
+
+static bool
+EndsWithAdf(const char *filename)
+{
+	size_t len;
+	if (!filename)
+		return false;
+	len = strlen(filename);
+	return len >= 4 && !strcasecmp(filename + len - 4, ".adf");
+}
+
+// Above this, a cached mp3 is removed and played by range request. IndexedDB
+// rewrites the whole save filesystem on every asset write, and a 31MB station
+// makes that rewrite stall the frame for as long as the station is cached.
+static const uint32 kStreamMp3Above = 1024 * 1024;
+
+static bool
+StreamRemoteMp3(const char *filename)
+{
+	uint32_t sz;
+	if (!HttpAssets::IsActive() || !EndsWithMp3(filename))
+		return false;
+	sz = HttpAssets::LocalSize(filename);
+	if (sz == 0)
+		return true;
+	if (sz <= kStreamMp3Above)
+		return false;
+	printf("HttpAssets: %s is %u bytes; streaming it instead of storing it\n", filename, sz);
+	HttpAssets::RemoveLocal(filename);
+	return true;
 }
 
 // True when the decoder may open the path. A missing remote mp3 is fetched
@@ -1329,6 +1585,7 @@ bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 
 	m_bPaused = false;
 	m_bActive = false;
+	m_bQueuedAudio = false;
 	m_bReset = false;
 	m_nVolume = 0;
 	m_nPan = 0;
@@ -1336,27 +1593,47 @@ bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 	m_nLoopCount = 1;
 	m_bWaitingForFile = false;
 
-	if (!StreamFileReady(filename)) {
+	const char *openName = filename;
+	char mp3Name[128];
+	// .adf is the PC radio container. The web build ships .mp3 and the ADF
+	// lookup walks the audio directory on every retry.
+	if (HttpAssets::IsActive() && EndsWithAdf(filename)) {
+		BuildMp3Filename(filename, mp3Name, sizeof(mp3Name));
+		openName = mp3Name;
+	}
+
+	bool remote = StreamRemoteMp3(openName);
+	if (!remote && !StreamFileReady(openName)) {
 		m_bWaitingForFile = true;
 		return false;
 	}
 
+	if (remote) {
+		strncpy(m_aFilename, openName, sizeof(m_aFilename) - 1);
+		m_aFilename[sizeof(m_aFilename) - 1] = '\0';
+	} else {
 // Be case-insensitive on linux (from https://github.com/OneSadCookie/fcaseopen/)
 #if !defined(_WIN32)
-	char *real = casepath(filename);
-	if (real) {
-		strcpy(m_aFilename, real);
-		free(real);
-	} else {
+		char *real = casepath(openName);
+		if (real) {
+			strcpy(m_aFilename, real);
+			free(real);
+		} else {
 #else
-	{
+		{
 #endif
-		strcpy(m_aFilename, filename);
+			strcpy(m_aFilename, openName);
+		}
 	}
 		
 	DEV("Stream %s\n", m_aFilename);
 
-	m_pSoundFile = CreateSoundDecoder(m_aFilename, overrideSampleRate);
+#ifdef AUDIO_OAL_USE_MPG123
+	if (remote)
+		m_pSoundFile = new CRemoteMp3(m_aFilename);
+	else
+#endif
+		m_pSoundFile = CreateSoundDecoder(m_aFilename, overrideSampleRate);
 
 	if (!(m_pSoundFile && m_pSoundFile->IsOpened()))
 	{
@@ -1377,6 +1654,7 @@ bool CStream::Open(const char* filename, uint32 overrideSampleRate)
 		uint32 bufSize = m_pSoundFile->GetBufferSize();
 		if(bufSize != 0) { // Otherwise it's deferred
 			m_pBuffer = malloc(bufSize);
+			m_nBufferBytes = m_pBuffer ? bufSize : 0;
 			ASSERT(m_pBuffer != nil);
 
 			DEV("AvgSamplesPerSec: %d\n", m_pSoundFile->GetAvgSamplesPerSec());
@@ -1403,6 +1681,7 @@ CStream::~CStream()
 void CStream::Close()
 {
 	m_bWaitingForFile = false;
+	m_bQueuedAudio = false;
 	if(!IsOpened()) return;
 
 #ifdef MULTITHREADED_AUDIO
@@ -1432,6 +1711,7 @@ void CStream::Close()
 	{
 		free(m_pBuffer);
 		m_pBuffer = nil;
+		m_nBufferBytes = 0;
 	}
 #endif
 }
@@ -1607,6 +1887,19 @@ bool CStream::FillBuffer(ALuint *alBuffer)
 	if ( !(alBuffer[1] != AL_NONE && alIsBuffer(alBuffer[1])) )
 		return false;
 #endif
+
+	uint32 need = m_pSoundFile->GetBufferSize();
+	if (need == 0)
+		return false;
+	if (m_nBufferBytes < need) {
+		void *grown = realloc(m_pBuffer, need);
+		if (!grown)
+			return false;
+		m_pBuffer = grown;
+		m_nBufferBytes = need;
+	}
+	if (!m_pBuffer)
+		return false;
 
 	uint32 size = m_pSoundFile->Decode(m_pBuffer);
 	if( size == 0 )
@@ -1795,19 +2088,20 @@ void CStream::Update()
 		ALint totalBuffers[2] = {0, 0};
 		ALint buffersProcessed[2] = {0, 0};
 
-		// Relying a lot on left buffer states in here
-
-		do
-		{
-			//alSourcef(m_pAlSources[0], AL_ROLLOFF_FACTOR, 0.0f);
-			alGetSourcei(m_pAlSources[0], AL_BUFFERS_QUEUED, &totalBuffers[0]);
-			alGetSourcei(m_pAlSources[0], AL_BUFFERS_PROCESSED, &buffersProcessed[0]);
-			//alSourcef(m_pAlSources[1], AL_ROLLOFF_FACTOR, 0.0f);
-			alGetSourcei(m_pAlSources[1], AL_BUFFERS_QUEUED, &totalBuffers[1]);
-			alGetSourcei(m_pAlSources[1], AL_BUFFERS_PROCESSED, &buffersProcessed[1]);
-		} while (buffersProcessed[0] != buffersProcessed[1]);
-
-		assert(buffersProcessed[0] == buffersProcessed[1]);
+		// Relying a lot on left buffer states in here.
+		// The two channels are separate WebAudio nodes. Their processed
+		// counts move on a timer, and that timer cannot run while this
+		// function is spinning, so waiting for the counts to match
+		// freezes the frame. Recycle only the buffers both have finished.
+		alGetSourcei(m_pAlSources[0], AL_BUFFERS_QUEUED, &totalBuffers[0]);
+		alGetSourcei(m_pAlSources[0], AL_BUFFERS_PROCESSED, &buffersProcessed[0]);
+		alGetSourcei(m_pAlSources[1], AL_BUFFERS_QUEUED, &totalBuffers[1]);
+		alGetSourcei(m_pAlSources[1], AL_BUFFERS_PROCESSED, &buffersProcessed[1]);
+		ALint processed = buffersProcessed[0] < buffersProcessed[1] ? buffersProcessed[0] : buffersProcessed[1];
+		if (processed < 0)
+			processed = 0;
+		buffersProcessed[0] = processed;
+		buffersProcessed[1] = processed;
 
 		// Correcting OpenAL concepts here:
 		// AL_BUFFERS_QUEUED = Number of *all* buffers in queue, including processed, processing and pending
@@ -1815,7 +2109,15 @@ void CStream::Update()
 		// which means: totalBuffers[0] - buffersProcessed[0] = pending buffers
 		
 		// We should wait queue to be cleared to loop track, because position calculation relies on queue.
-		if (m_nLoopCount != 1 && m_bActive && totalBuffers[0] == 0)
+		// A remote track is not decoded yet on the first fill. Queueing a
+		// silent placeholder left a single 250ms buffer, so the source ran
+		// dry between refills. Wait until real samples exist, then fill the
+		// whole queue. A one-shot that already played out stays stopped.
+		if (m_bActive && totalBuffers[0] == 0 && !m_bQueuedAudio)
+		{
+			BuffersShouldBeFilled();
+		}
+		else if (m_nLoopCount != 1 && m_bActive && totalBuffers[0] == 0)
 		{
 #ifdef MULTITHREADED_AUDIO
 			std::lock_guard<std::mutex> lock(m_mutex);
