@@ -1196,6 +1196,35 @@ extern bool gbRenderWorld2;
 #ifndef MASTER
 const int   re3_buffsize = 1024;
 static char re3_buff[re3_buffsize];
+
+// __FILE__ is whatever path the compiler was given, usually absolute.
+// This file lives at src/core/re3.cpp, so the prefix before that suffix
+// is the repo root. Strip it so TRACE and assert print a relative path.
+static const char *
+re3_relpath(const char *filename)
+{
+	static const char self[] = __FILE__;
+	static int prefix = -1;
+
+	if(prefix < 0){
+		prefix = 0;
+		const char *tails[] = {
+			"src/core/re3.cpp",
+			"src\\core\\re3.cpp",
+		};
+		size_t selfLen = sizeof(self) - 1;
+		for(int i = 0; i < 2; i++){
+			size_t tailLen = strlen(tails[i]);
+			if(selfLen >= tailLen && memcmp(self + selfLen - tailLen, tails[i], tailLen) == 0){
+				prefix = (int)(selfLen - tailLen);
+				break;
+			}
+		}
+	}
+	if(filename && prefix > 0 && strncmp(filename, self, (size_t)prefix) == 0)
+		return filename + prefix;
+	return filename;
+}
 #endif
 
 #ifndef MASTER
@@ -1208,7 +1237,7 @@ void re3_assert(const char *expr, const char *filename, unsigned int lineno, con
 	strcat_s(re3_buff, re3_buffsize, "\n" );	
 	
 	strcat_s(re3_buff, re3_buffsize, "File: ");
-	strcat_s(re3_buff, re3_buffsize, filename );
+	strcat_s(re3_buff, re3_buffsize, re3_relpath(filename) );
 	strcat_s(re3_buff, re3_buffsize, "\n" );	
 
 	strcat_s(re3_buff, re3_buffsize, "Line: " );
@@ -1248,7 +1277,7 @@ void re3_assert(const char *expr, const char *filename, unsigned int lineno, con
 	abort();
 #else
 	// TODO
-	printf("\nREVC ASSERT FAILED\n\tFile: %s\n\tLine: %d\n\tFunction: %s\n\tExpression: %s\n",filename,lineno,func,expr);
+	printf("\nREVC ASSERT FAILED\n\tFile: %s\n\tLine: %d\n\tFunction: %s\n\tExpression: %s\n",re3_relpath(filename),lineno,func,expr);
 	assert(false);
 #endif
 }
@@ -1281,12 +1310,12 @@ void re3_trace(const char *filename, unsigned int lineno, const char *func, cons
 	vsprintf_s(re3_buff, re3_buffsize, format, va);
 	va_end(va);
 	
-	sprintf_s(buff, re3_buffsize * 2, "[%s.%s:%d]: %s", filename, func, lineno, re3_buff);
+	sprintf_s(buff, re3_buffsize * 2, "[%s.%s:%d]: %s", re3_relpath(filename), func, lineno, re3_buff);
 #else
 	vsprintf(re3_buff, format, va);
 	va_end(va);
 	
-	sprintf(buff, "[%s.%s:%d]: %s", filename, func, lineno, re3_buff);
+	sprintf(buff, "[%s.%s:%d]: %s", re3_relpath(filename), func, lineno, re3_buff);
 #endif
 
 	OutputDebugString(buff);

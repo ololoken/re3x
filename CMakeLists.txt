@@ -11,6 +11,13 @@ include(GetGitRevisionDescription)
 get_git_head_revision(GIT_REFSPEC GIT_SHA1 "ALLOW_LOOKING_ABOVE_CMAKE_SOURCE_DIR")
 message(STATUS "Building ${CMAKE_PROJECT_NAME} GIT SHA1: ${GIT_SHA1}")
 
+# __FILE__ in TRACE, assert, and librw RWERROR follows the path cmake passes
+# to the compiler. Map the source root away so those prints are repo-relative.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang" OR
+   (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 8))
+    add_compile_options("-fmacro-prefix-map=${CMAKE_SOURCE_DIR}/=")
+endif()
+
 
 if(NINTENDO_SWITCH)
     list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}/cmake/nx")

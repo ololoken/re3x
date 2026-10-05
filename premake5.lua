@@ -81,6 +81,10 @@ workspace "reVC"
 		linkoptions { "-fsanitize=address" }
 	end
 
+	-- gcc/clang bake the compile path into __FILE__. Keep debug prints relative.
+	filter { "system:not windows" }
+		buildoptions { "-fmacro-prefix-map=" .. _MAIN_SCRIPT_DIR .. "/=" }
+
 	filter { "system:windows" }
 		configurations { "Vanilla" }
 		platforms {

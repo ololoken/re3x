@@ -36,9 +36,15 @@ struct Waiter {
 	void *user;
 };
 
+struct MemWaiter {
+	void (*done)(bool ok, const uint8_t *data, uint32_t size, void *user);
+	void *user;
+};
+
 struct FetchOp {
 	std::string key;
 	std::vector<Waiter> waiters;
+	std::vector<MemWaiter> memWaiters;
 };
 
 std::map<std::string, FetchOp *> g_inflight;
@@ -157,26 +163,64 @@ localFile(const char *relPath, std::string &out, uint32_t *sizeOut)
 
 struct MemOp {
 	std::string key;
-	std::string url;
-	void (*done)(bool, const uint8_t *, uint32_t, void *);
-	void *user;
+	std::vector<MemWaiter> memWaiters;
+	std::vector<Waiter> diskWaiters;
 };
+
+std::map<std::string, MemOp *> g_memInflight;
+
+static bool
+anyInflight()
+{
+	return !g_inflight.empty() || !g_memInflight.empty();
+}
+
+bool writeFile(const std::string &path, const uint8_t *data, size_t size);
+void scheduleSync();
+void notifyLoadBar();
 
 void
 finishMemFetch(emscripten_fetch_t *fetch, bool httpOk)
 {
 	MemOp *op = (MemOp *)fetch->userData;
 	int status = fetch->status;
-	const uint8_t *data = (const uint8_t *)fetch->data;
-	uint32_t size = (uint32_t)fetch->numBytes;
-	bool ok = httpOk && status == 200 && data && size > 0;
+	std::vector<uint8_t> bytes;
+	if (httpOk && status == 200 && fetch->data && fetch->numBytes)
+		bytes.assign((const uint8_t *)fetch->data, (const uint8_t *)fetch->data + fetch->numBytes);
+	emscripten_fetch_close(fetch);
+	if (!op)
+		return;
+
+	bool ok = !bytes.empty();
 	if (!ok && status == 404)
 		g_missing.insert(op->key);
 	if (!ok && status != 404)
 		printf("HttpAssets: %s%s failed (%d)\n", g_root.c_str(), op->key.c_str(), status);
-	op->done(ok, ok ? data : nullptr, ok ? size : 0, op->user);
-	emscripten_fetch_close(fetch);
+
+	auto memWaiters = std::move(op->memWaiters);
+	auto diskWaiters = std::move(op->diskWaiters);
+	std::string key = op->key;
+	g_memInflight.erase(key);
+	g_loadDone++;
 	delete op;
+
+	// A disk waiter asked for a cached file. Memory-only callers (radio)
+	// do not, so a large track is not written into IndexedDB.
+	bool wrote = false;
+	if (ok && !diskWaiters.empty()) {
+		wrote = writeFile(key, bytes.data(), bytes.size());
+		if (wrote)
+			scheduleSync();
+	}
+	notifyLoadBar();
+	for (auto &w : memWaiters) {
+		if (w.done)
+			w.done(ok, ok ? bytes.data() : nullptr, ok ? (uint32_t)bytes.size() : 0, w.user);
+	}
+	for (auto &w : diskWaiters) {
+		if (w.cb)
+			w.cb(wrote, w.user);
+	}
 }
 
 void
@@ -253,7 +297,7 @@ notifyLoadBar()
 	EM_ASM({
 		if (typeof Module !== 'undefined' && Module.callbacks && Module.callbacks.onAssetLoad)
 			Module.callbacks.onAssetLoad({ done: $0, total: $1, active: $2 });
-	}, g_loadDone, g_loadTotal, g_inflight.empty() ? 0 : 1);
+	}, g_loadDone, g_loadTotal, anyInflight() ? 1 : 0);
 }
 
 void startFetch(FetchOp *op);
@@ -287,9 +331,14 @@ finishFetch(emscripten_fetch_t *fetch, bool httpOk)
 	if (!op)
 		return;
 
+	auto memWaiters = op->memWaiters;
 	if (!httpOk || status != 200) {
 		printf("HttpAssets: %s%s failed (%d)\n", g_root.c_str(), op->key.c_str(), status);
 		complete(op, false, status);
+		for (auto &w : memWaiters) {
+			if (w.done)
+				w.done(false, nullptr, 0, w.user);
+		}
 		return;
 	}
 
@@ -300,6 +349,11 @@ finishFetch(emscripten_fetch_t *fetch, bool httpOk)
 	else
 		printf("HttpAssets: failed to cache %s\n", op->key.c_str());
 	complete(op, wrote, status);
+	bool have = !bytes.empty();
+	for (auto &w : memWaiters) {
+		if (w.done)
+			w.done(have, have ? bytes.data() : nullptr, have ? (uint32_t)bytes.size() : 0, w.user);
+	}
 }
 
 void
@@ -355,8 +409,13 @@ request(const char *relPath, void (*cb)(bool, void *), void *user)
 		it->second->waiters.push_back({ cb, user });
 		return;
 	}
+	auto mem = g_memInflight.find(key);
+	if (mem != g_memInflight.end()) {
+		mem->second->diskWaiters.push_back({ cb, user });
+		return;
+	}
 
-	if (g_inflight.empty()) {
+	if (!anyInflight()) {
 		g_loadDone = 0;
 		g_loadTotal = 0;
 	}
@@ -608,12 +667,28 @@ HttpAssets::FetchToMemory(const char *relPath,
 		return;
 	}
 
-	MemOp *op = new MemOp;
-	op->key = std::move(key);
-	op->url = g_root + op->key + "?v=1";
-	op->done = done;
-	op->user = user;
+	auto disk = g_inflight.find(key);
+	if (disk != g_inflight.end()) {
+		disk->second->memWaiters.push_back({ done, user });
+		return;
+	}
+	auto mem = g_memInflight.find(key);
+	if (mem != g_memInflight.end()) {
+		mem->second->memWaiters.push_back({ done, user });
+		return;
+	}
 
+	if (!anyInflight()) {
+		g_loadDone = 0;
+		g_loadTotal = 0;
+	}
+	g_loadTotal++;
+	MemOp *op = new MemOp;
+	op->key = key;
+	op->memWaiters.push_back({ done, user });
+	g_memInflight.emplace(key, op);
+
+	std::string url = g_root + key + "?v=1";
 	emscripten_fetch_attr_t attr;
 	emscripten_fetch_attr_init(&attr);
 	strcpy(attr.requestMethod, "GET");
@@ -621,7 +696,8 @@ HttpAssets::FetchToMemory(const char *relPath,
 	attr.userData = op;
 	attr.onsuccess = onMemFetch;
 	attr.onerror = onMemFetchError;
-	emscripten_fetch(&attr, op->url.c_str());
+	emscripten_fetch(&attr, url.c_str());
+	notifyLoadBar();
 }
 
 void
